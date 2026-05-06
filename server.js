@@ -5,6 +5,7 @@ import cookieParser from "cookie-parser";
 // Import routes
 import movieRoutes from "./routes/movieRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
+import watchlistRoutes from "./routes/watchlistRoutes.js";
 
 config();
 connectDB();
@@ -19,6 +20,7 @@ app.use(cookieParser());
 // api routes
 app.use("/auth", authRoutes);
 app.use("/movies", movieRoutes);
+app.use("/watchlist", watchlistRoutes);
 
 const port = 3000;
 

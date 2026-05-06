@@ -63,3 +63,51 @@ A: After the middleware finishes its work with `req` and `res`, calling `next()`
 
 Q: What happens if middleware never calls `next()` and never sends a response?
 A: The request hangs forever. The app keeps running but that specific request never resolves — the client just waits until it times out. This is called a "hanging request" and is a common bug from a missing `return` or forgotten `next()` call.
+
+---
+
+## Phase 4 — Watchlist Controller
+
+**What this module does**
+Handles all watchlist operations for the logged-in user — get their list, add a movie, update status/rating/notes, and remove an item. Each item links a user to a movie with extra metadata (status, rating, notes). All routes are protected and scoped to `req.user.id`.
+
+**Key design decision**
+Before creating a watchlist item, we verify the movie exists first and return 404 if not. This gives the client a meaningful error instead of a cryptic database foreign key violation. The duplicate check is handled by catching Prisma's `P2002` unique constraint error.
+
+**One thing I found surprising**
+The Prisma model name is `WatchlistItem` in the schema, but Prisma generates it as `prisma.watchlistItem` (camelCase) in the client. Using `prisma.watchlist` silently fails — always match the exact camelCase model name.
+
+**Interview Q&A**
+
+Q: What happens if the client adds the same movie to their watchlist twice?
+A: Prisma throws an error with code `P2002` (unique constraint violation) because of the `@@unique([userId, movieId])` constraint in the schema. We catch that specific error and return a 400 instead of letting it crash.
+
+Q: What is `include: { movie: true }` doing in `getWatchlist`?
+A: It tells Prisma to JOIN the related movie record and nest it inside each watchlist item. Without it, the response only contains the `movieId` field and the client would need a separate request to get movie details — inefficient. It's Prisma's equivalent of a SQL JOIN.
+
+Q: When should you use `findUnique` vs `findFirst`?
+A: `findUnique` is for fields marked `@id` or `@unique` in the schema — it's faster because the database uses an index. `findFirst` works on any field but scans the table. When searching by ID, always prefer `findUnique`.
+
+Q: Why check if the movie exists before creating the watchlist item instead of just letting the DB throw an error?
+A: A missing movie would cause a foreign key violation — a cryptic database error. Checking first lets you return a clean 404 with a useful message. Same "fetch first" pattern as the movie controller's ownership check.
+
+---
+
+## Phase 5 — Watchlist Routes
+
+**What this module does**
+Maps HTTP methods and URL patterns to the watchlist controller functions. All four routes are protected — the watchlist is fully private, unlike movies where GET was public.
+
+**Key design decision**
+Every route applies `protect` middleware because watchlist data is personal. There's no public access — you must be logged in to view or modify any watchlist.
+
+**One thing I found surprising**
+The route file just wires things up — no logic lives here. All the real decisions (auth checks, DB queries, error handling) are in the controller. Routes are intentionally thin.
+
+**Interview Q&A**
+
+Q: Why are all watchlist routes protected when some movie routes are public?
+A: A movie is shared content anyone can browse. A watchlist is personal data — it only makes sense in the context of a specific user. There's no use case for reading someone else's watchlist anonymously.
+
+Q: What's the role of a route file vs a controller file?
+A: The route file maps URLs and HTTP methods to handler functions and decides which middleware applies. The controller contains the actual business logic — DB queries, validation, response formatting. Keeping them separate makes the code easier to read and test.
