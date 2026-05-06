@@ -1,0 +1,63 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id       String   @id @default(uuid())
+  name     String
+  email    String   @unique
+  password String
+  createdAt DateTime @default(now())
+
+  movies   Movie[]  @relation("MovieCreator") // Relation to movies created by the user
+  watchlistItems WatchlistItem[]
+}
+
+model Movie {
+  id          String   @id @default(uuid())
+  title       String
+  overview    String?
+  releaseYear Int
+  genres      String[] @default([])
+  runtime     Int?
+  posterUrl   String?
+  createdBy   String
+  createdAt   DateTime @default(now())
+  creator    User     @relation("MovieCreator",fields: [createdBy], references: [id], onDelete: Cascade) // Ensure that if a user is deleted, the corresponding movies are also deleted
+  watchlistItems WatchlistItem[]
+}
+
+model WatchlistItem {
+  id        String   @id @default(uuid())
+  userId    String
+  movieId   String
+  status    WatchlistStatus @default(PLANNED)   
+  rating    Int? // User rating for the movie (1-10)
+  notes     String? // User notes about the movie
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now())
+
+  //relations
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  movie Movie @relation(fields: [movieId], references: [id], onDelete: Cascade)// Ensure that if a user or movie is deleted, the corresponding watchlist items are also deleted
+
+  @@unique([userId, movieId]) // Ensure a user can only have one entry per movie in their watchlist
+}
+
+enum WatchlistStatus {
+  PLANNED
+  WATCHING
+  COMPLETED
+  DROPPED
+}
