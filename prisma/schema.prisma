@@ -36,6 +36,7 @@ model Movie {
   createdAt   DateTime @default(now())
   creator    User     @relation("MovieCreator",fields: [createdBy], references: [id], onDelete: Cascade) // Ensure that if a user is deleted, the corresponding movies are also deleted
   watchlistItems WatchlistItem[]
+  sessions    Session[]
 }
 
 model WatchlistItem {
@@ -60,4 +61,59 @@ enum WatchlistStatus {
   WATCHING
   COMPLETED
   DROPPED
+}
+
+model Cinema {                                                                                
+  id         String    @id @default(uuid())
+  // cinema display name
+  name       String
+  // URL-safe identifier, must be unique                                                        
+  slug       String     @unique
+  // street address                                                                             
+  address    String                                                                              
+  // Christchurch suburb                                                                        
+  suburb     String                                                                              
+  // map coordinates
+  latitude   Float  
+  longitude  Float
+  // where users go to browse / buy tickets                                                     
+  websiteUrl String
+  bookingUrl String?       // optional — not all cinemas have a direct booking page                 
+  // where the scraper pulls showtime data from                                                 
+  scrapeUrl  String                                                                                
+  // default to NZ timezone                                                                     
+  timezone   String    @default("Pacific/Auckland")                                           
+  // soft-disable a cinema without deleting it                                                  
+  isActive   Boolean   @default(true)                                                           
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt                                                               
+  // relation field — list of all sessions at this cinema                                     
+  sessions   Session[]                                                                                 
+  }    
+
+  model Session {
+  id              String   @id @default(uuid())
+  // foreign keys
+  cinemaId        String
+  movieId         String
+  // when the film starts
+  startsAt        DateTime
+  // e.g. "Standard", "IMAX", "3D"
+  format          String   @default("Standard")
+  // optional — scraper may not have this
+  seatsTotal      Int?
+  seatsRemaining  Int?
+  // direct link to this specific session's booking page
+  bookingUrl      String?      // optional
+  // the cinema's own internal ID for this session (for deep-linking)
+  sourceSessionId String?      // optional
+  scrapedAt       DateTime @default(now())
+  createdAt       DateTime @default(now())
+  // relation back to Cinema
+  cinema          Cinema     @relation(fields: [cinemaId], references: [id], onDelete: Cascade)
+  // relation back to Movie
+  movie           Movie      @relation(fields: [movieId], references: [id], onDelete: Cascade)
+  // indexes for fast lookups 
+  @@index([movieId, startsAt])
+  @@index([cinemaId, startsAt])
 }
