@@ -2,6 +2,7 @@ import express from "express";
 import { config } from "dotenv";
 import { connectDB, disconnectDB } from "./config/db.js";
 import cookieParser from "cookie-parser";
+import cors from "cors";
 // Import routes
 import movieRoutes from "./routes/movieRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
@@ -16,6 +17,14 @@ app.use(express.json());
 
 // Middleware to parse cookies
 app.use(cookieParser());
+
+// CORS middleware (for development, adjust as needed for production)
+app.use(
+  cors({
+    origin: "http://localhost:5173", // Adjust this to your frontend URL
+    credentials: true, // Allow cookies to be sent with requests
+  }),
+);
 
 // api routes
 app.use("/auth", authRoutes);

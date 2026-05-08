@@ -138,3 +138,27 @@ A: Add a second `target` argument defaulting to `"body"`, then use `schema.parse
 
 Q: Why is `validate` a factory function (a function that returns a function) instead of a regular middleware?
 A: Regular middleware always does the same thing — it can't accept configuration. A factory lets you pass a schema in and get back a middleware with that schema baked in via closure. This makes `validate` reusable across all routes with different schemas.
+
+---
+
+## Phase 7 — Housekeeping & Project Rename
+
+**What this phase does**
+Renames the project from "movie_recommender" to "AI Movie Mate", fixes the session duration from 1 hour to 30 days, and adds CORS middleware so the future React frontend can call the API.
+
+**Key design decision**
+CORS must be added before the first feature phase because a frontend running on `localhost:5173` calling an API on `localhost:3000` is cross-origin — the browser will block those requests by default. Fixing this now means Phase 5 (frontend) has no blockers on day one.
+
+**One thing I found surprising**
+`credentials: true` is required in the CORS config alongside the `origin` setting. Without it, the browser strips cookies from cross-origin requests — meaning the JWT cookie would never be sent, breaking auth for every protected route.
+
+**Interview Q&A**
+
+Q: Why do we keep a CLAUDE.md file in a project?
+A: It gives Claude Code a persistent understanding of the codebase at the start of every session — architecture, commands, known gotchas. Without it, you'd have to re-explain the project every time. It also saves tokens because a concise CLAUDE.md is much shorter than a full codebase walkthrough.
+
+Q: Why does the Epic 4 redesign use one `WatchlistItem` table for both "Want to Watch" and "Watched" lists instead of two separate tables?
+A: One table keeps writes simple and avoids a data migration problem — when a movie moves from PLANNED to COMPLETED you just update the `status` field. Two tables would require deleting from one and inserting into the other, with risk of data loss if one step fails. Filtering by `status` at query time gives you the two list views without extra complexity.
+
+Q: What problem does CORS solve, and why is it relevant when building a separate frontend and backend?
+A: Browsers block cross-origin requests by default — a page on `localhost:5173` cannot call an API on `localhost:3000` without the server's permission. CORS headers tell the browser which origins are allowed. Without it, every API call from the React frontend would be rejected before it even reached the server.
