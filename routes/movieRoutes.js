@@ -7,6 +7,12 @@ import {
   updateMovie,
   deleteMovie,
 } from "../controller/movieController.js";
+import { validate } from "../middleware/validateRequest.js";
+
+import {
+  createMovieSchema,
+  updateMovieSchema,
+} from "../validators/movieValidators.js";
 const router = express.Router();
 
 //public routes
@@ -14,8 +20,8 @@ router.get("/", getAllMovies);
 router.get("/:id", getMovieById);
 
 //protected routes
-router.post("/", protect, createMovie);
-router.put("/:id", protect, updateMovie);
+router.post("/", protect, validate(createMovieSchema), createMovie);
+router.put("/:id", protect, validate(updateMovieSchema), updateMovie);
 router.delete("/:id", protect, deleteMovie);
 
 export default router;

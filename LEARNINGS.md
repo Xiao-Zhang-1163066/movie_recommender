@@ -111,3 +111,30 @@ A: A movie is shared content anyone can browse. A watchlist is personal data —
 
 Q: What's the role of a route file vs a controller file?
 A: The route file maps URLs and HTTP methods to handler functions and decides which middleware applies. The controller contains the actual business logic — DB queries, validation, response formatting. Keeping them separate makes the code easier to read and test.
+
+---
+
+## Phase 6 — Input Validation with Zod
+
+**What this module does**
+Validates incoming request bodies before they reach the controller. A reusable `validate` middleware factory takes a Zod schema, runs `schema.parse(req.body)`, and returns a 400 with clear error messages if validation fails. Schemas are defined per-resource in the `validators/` folder.
+
+**Key design decision**
+`validate` is a middleware factory — a function that returns a function — so it can be reused with different schemas across routes. This is the closure pattern: the inner middleware function remembers the `schema` argument passed to the outer function.
+
+**One thing I found surprising**
+`updateMovieSchema` doesn't need to be written from scratch — `createMovieSchema.partial()` makes all fields optional while keeping all the same validation rules. Similarly, `updateWatchlistSchema` uses `.omit({ movieId: true }).partial()` to remove a field and make the rest optional in one line.
+
+**Interview Q&A**
+
+Q: Walk me through what happens when a request hits `router.post("/movies", protect, validate(createMovieSchema), createMovie)`.
+A: Express runs middleware left to right. First `protect` checks the JWT — if invalid it returns 401 and stops. If valid, `validate(createMovieSchema)` runs `schema.parse(req.body)` — if the body is invalid it returns 400 with error messages and stops. If both pass, `createMovie` runs and hits the database.
+
+Q: What's the difference between `schema.parse()` and `schema.safeParse()`?
+A: `parse()` throws a ZodError on failure — you need try/catch. `safeParse()` never throws; it returns `{ success: true, data }` or `{ success: false, error }`. Use `parse()` inside try/catch blocks. Use `safeParse()` when you want to handle the result inline without exceptions.
+
+Q: How would you extend the `validate` middleware to also validate `req.params` or `req.query`?
+A: Add a second `target` argument defaulting to `"body"`, then use `schema.parse(req[target])`. Since `req.body`, `req.params`, and `req.query` are all properties on `req`, passing the key as a string lets you point the validator at any of them: `validate(idSchema, "params")` or `validate(querySchema, "query")`.
+
+Q: Why is `validate` a factory function (a function that returns a function) instead of a regular middleware?
+A: Regular middleware always does the same thing — it can't accept configuration. A factory lets you pass a schema in and get back a middleware with that schema baked in via closure. This makes `validate` reusable across all routes with different schemas.
