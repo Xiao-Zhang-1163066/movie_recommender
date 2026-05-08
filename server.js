@@ -8,6 +8,7 @@ import movieRoutes from "./routes/movieRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
 import watchlistRoutes from "./routes/watchlistRoutes.js";
 import sessionRoutes from "./routes/sessionRoutes.js";
+import chatRoutes from "./routes/chatRoutes.js";
 
 config();
 connectDB();
@@ -32,6 +33,7 @@ app.use("/auth", authRoutes);
 app.use("/movies", movieRoutes);
 app.use("/watchlist", watchlistRoutes);
 app.use("/sessions", sessionRoutes);
+app.use("/chat", chatRoutes);
 
 const port = 3000;
 

@@ -11,8 +11,10 @@
   "description": "AI-powered cinema companion for Christchurch film-goers",
   "type": "module",
   "dependencies": {
+    "@ai-sdk/google": "^3.0.70",
     "@prisma/adapter-pg": "^7.4.2",
     "@prisma/client": "^7.4.2",
+    "ai": "^6.0.176",
     "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",

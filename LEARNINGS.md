@@ -186,3 +186,27 @@ A: A composite index covers two columns together. `@@index([movieId, startsAt])`
 
 Q: What's the difference between a relation field and a foreign key field in Prisma?
 A: A foreign key field like `cinemaId String` is a real database column — it stores the UUID of the related cinema. A relation field like `sessions Session[]` on `Cinema` is virtual — it exists only in Prisma's type layer, creates no column, and is just a convenience handle that tells Prisma how to JOIN when you use `include: { sessions: true }`.
+
+---
+
+## Phase 9 — Basic /chat endpoint
+
+**What this module does**
+A protected `POST /chat` endpoint that accepts a conversation history (`messages` array) from the client, forwards it to Gemini via the Vercel AI SDK, and returns the model's response as JSON. It is the foundation for the agentic loop added in Phase 4.
+
+**Key design decision**
+The client sends the full conversation history on every request rather than the server storing it. LLMs are stateless — Gemini has no memory between calls, so context must be included in each request. Keeping history on the client keeps the server simple and avoids a session storage layer. Server-side persistence is a valid production pattern but adds complexity (session IDs, a storage layer, cleanup logic) that isn't needed yet.
+
+**One thing I found surprising**
+The Vercel AI SDK returns an object from `generateText`, not a string. The response text lives at `result.text`. A cleaner pattern is to destructure it directly: `const { text } = await generateText(...)` — then `res.json({ text })` works without an intermediate variable.
+
+**Interview Q&A**
+
+Q: Why does `createGoogleGenerativeAI` live outside the controller function instead of inside it?
+A: It initialises the provider once at module load rather than on every request. Creating a new provider instance per request is wasteful — it re-reads the API key and allocates objects unnecessarily. This is the module-level singleton pattern: expensive setup happens once, and the result is reused across all calls.
+
+Q: Why does the client send the full conversation history on every request instead of the server remembering it?
+A: LLMs are stateless — each call to `generateText` is independent and the model has no memory of prior requests. The only way it gets context is if you include it in the current call. The client owns the conversation array, appends each new turn, and sends the whole thing every time. Server-side history storage is a real pattern but requires session IDs, a storage layer, and cleanup logic — not worth the complexity at this stage.
+
+Q: What is the difference between `generateText` and `streamText`, and why use `generateText` here?
+A: `generateText` waits for the full response and returns it all at once — simple request/response. `streamText` sends the response token by token via SSE so the client sees words appearing in real time. We use `generateText` for Phase 3 because it is simpler to test and reason about. `streamText` becomes important in Phase 4 when the agentic loop adds tool calls that can take several seconds — streaming prevents the UI from appearing frozen.
