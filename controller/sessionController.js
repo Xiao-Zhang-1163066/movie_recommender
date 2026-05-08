@@ -7,8 +7,8 @@ export const getSessions = async (req, res) => {
     cinemaId: cinemaId ? cinemaId : undefined,
     startsAt: date
       ? {
-          gte: Date(date),
-          lt: Date(new Date(date).getTime() + 24 * 60 * 60 * 1000),
+          gte: new Date(date),
+          lt: new Date(new Date(date).getTime() + 24 * 60 * 60 * 1000),
         }
       : undefined,
   };

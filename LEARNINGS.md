@@ -162,3 +162,27 @@ A: One table keeps writes simple and avoids a data migration problem — when a 
 
 Q: What problem does CORS solve, and why is it relevant when building a separate frontend and backend?
 A: Browsers block cross-origin requests by default — a page on `localhost:5173` cannot call an API on `localhost:3000` without the server's permission. CORS headers tell the browser which origins are allowed. Without it, every API call from the React frontend would be rejected before it even reached the server.
+
+---
+
+## Phase 8 — Cinema & Session Schema + Sessions Route
+
+**What this module does**
+Adds two new Prisma models (`Cinema` and `Session`) to the database schema and scaffolds a public `GET /sessions` endpoint. Sessions represent individual screenings of a movie at a cinema. The endpoint accepts optional `movieId`, `cinemaId`, and `date` query params to filter results. The table is empty until the Python scraper populates it in a later phase.
+
+**Key design decision**
+The `Session` model has two composite indexes: `@@index([movieId, startsAt])` and `@@index([cinemaId, startsAt])`. Without them, queries like "all sessions for this movie today" do a full table scan. With them, Postgres uses a B-tree index to jump directly to the matching rows, already sorted by time — the difference between 2ms and 2 seconds at real data volumes.
+
+**One thing I found surprising**
+When the Prisma schema uses a custom `output` path (`output = "../generated/prisma"`), `prisma generate` writes the client there — not to the default `@prisma/client` location. Importing from `"@prisma/client"` gives you the old client with no new models. You must import from the custom output path: `"../generated/prisma/index.js"`.
+
+**Interview Q&A**
+
+Q: Why does `GET /sessions` return 200 with an empty array instead of 404 when there's no data?
+A: 404 means the resource doesn't exist. The `/sessions` endpoint exists — it just has no data yet. An empty array is a successful response. 404 is for a specific resource that can't be found (e.g. `GET /sessions/:id` with an unknown ID). Collection endpoints always return 200; the collection is real, it's just empty.
+
+Q: What is a composite index and why does `Session` need one?
+A: A composite index covers two columns together. `@@index([movieId, startsAt])` lets Postgres answer "give me all sessions for movie X ordered by start time" using an index rather than a full table scan. It works because the query always filters by the first column (`movieId`) and range-filters or sorts by the second (`startsAt`). At 100,000 session rows the difference is milliseconds vs seconds.
+
+Q: What's the difference between a relation field and a foreign key field in Prisma?
+A: A foreign key field like `cinemaId String` is a real database column — it stores the UUID of the related cinema. A relation field like `sessions Session[]` on `Cinema` is virtual — it exists only in Prisma's type layer, creates no column, and is just a convenience handle that tells Prisma how to JOIN when you use `include: { sessions: true }`.

@@ -7,6 +7,7 @@ import cors from "cors";
 import movieRoutes from "./routes/movieRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
 import watchlistRoutes from "./routes/watchlistRoutes.js";
+import sessionRoutes from "./routes/sessionRoutes.js";
 
 config();
 connectDB();
@@ -30,6 +31,7 @@ app.use(
 app.use("/auth", authRoutes);
 app.use("/movies", movieRoutes);
 app.use("/watchlist", watchlistRoutes);
+app.use("/sessions", sessionRoutes);
 
 const port = 3000;
 
