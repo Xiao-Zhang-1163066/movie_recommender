@@ -210,3 +210,30 @@ A: LLMs are stateless — each call to `generateText` is independent and the mod
 
 Q: What is the difference between `generateText` and `streamText`, and why use `generateText` here?
 A: `generateText` waits for the full response and returns it all at once — simple request/response. `streamText` sends the response token by token via SSE so the client sees words appearing in real time. We use `generateText` for Phase 3 because it is simpler to test and reason about. `streamText` becomes important in Phase 4 when the agentic loop adds tool calls that can take several seconds — streaming prevents the UI from appearing frozen.
+
+---
+
+## Phase 10 — Agentic loop + streaming
+
+**What this module does**
+Upgrades the `/chat` endpoint from a simple passthrough into a full agentic loop. The model can now call 6 tools — `get_user_watchlist`, `get_taste_profile`, `mark_watched`, `search_movies`, `get_movie_details`, `get_showtimes` — and loop through multiple steps before producing a final text response. Responses stream token by token via SSE so the client sees output immediately.
+
+**Key design decision**
+Database tools (`get_user_watchlist`, `get_taste_profile`, `mark_watched`) are defined inside the `chat` function rather than at module level. This is the closure pattern — the `execute` functions close over `userId` extracted from `req.user`, so they always query for the correct user without needing access to `req`. Module-level tools can't do this because `userId` is per-request, not static.
+
+**One thing I found surprising**
+Tool use creates two different ID spaces for movies. `search_movies` returns TMDB integer IDs (e.g. `27205`), but our `Session` table stores `movieId` as a UUID referencing our own database. Passing a TMDB ID to `get_showtimes` would silently return no results. The fix is a mapping layer — a `tmdbId` field on the `Movie` model so you can resolve the local UUID from the TMDB ID before querying sessions.
+
+**Interview Q&A**
+
+Q: Who actually executes a tool when the model "calls" it — Gemini/Llama or your server?
+A: Your server. The model returns structured JSON describing which tool to call and with what arguments. The Vercel AI SDK reads that JSON, finds the matching function you defined, runs it on your server, and feeds the result back to the model as a new message. The model never touches your code or your database directly.
+
+Q: Why are the database tools defined inside the `chat` function rather than at module level?
+A: They need `userId` to scope queries to the logged-in user, and `userId` comes from `req.user` which is per-request. By defining the tools inside `chat`, the `execute` functions close over `userId` — they capture the variable from the outer scope and remember it. This is the closure pattern. Module-level tools have no access to request state.
+
+Q: What does `stopWhen: stepCountIs(5)` protect against?
+A: An infinite tool-calling loop. Without a limit, a model that keeps calling tools (due to a bug, a bad prompt, or a confused reasoning loop) would run forever, burning API credits and never responding. `stopWhen: stepCountIs(5)` caps the loop at 5 steps and forces a final response.
+
+Q: `search_movies` returns TMDB IDs but `get_showtimes` queries our database by UUID. What problem does this cause and how would you fix it?
+A: The agent would pass a TMDB integer ID to `get_showtimes`, which queries `Session.movieId` — a UUID referencing our own `Movie` table. The query silently returns nothing. The fix is to add a `tmdbId` field to the `Movie` model so `get_showtimes` can first look up the local UUID from the TMDB ID before querying sessions.

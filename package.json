@@ -12,6 +12,7 @@
   "type": "module",
   "dependencies": {
     "@ai-sdk/google": "^3.0.70",
+    "@ai-sdk/groq": "^3.0.39",
     "@prisma/adapter-pg": "^7.4.2",
     "@prisma/client": "^7.4.2",
     "ai": "^6.0.176",
