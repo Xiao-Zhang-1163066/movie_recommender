@@ -237,25 +237,3 @@ A: An infinite tool-calling loop. Without a limit, a model that keeps calling to
 
 Q: `search_movies` returns TMDB IDs but `get_showtimes` queries our database by UUID. What problem does this cause and how would you fix it?
 A: The agent would pass a TMDB integer ID to `get_showtimes`, which queries `Session.movieId` — a UUID referencing our own `Movie` table. The query silently returns nothing. The fix is to add a `tmdbId` field to the `Movie` model so `get_showtimes` can first look up the local UUID from the TMDB ID before querying sessions.
-
-## Phase 11 — Frontend Scaffold (Vite + React + Tailwind + shadcn/ui)
-
-**What this module does**
-Sets up a standalone React frontend in the `client/` folder, separate from the Express backend. Vite handles dev serving and bundling, Tailwind provides utility-first styling, and shadcn/ui copies accessible component source files directly into the project. A dev proxy forwards `/api/*` requests to the Express server so the browser never makes a cross-origin request.
-
-**Key design decision**
-The frontend lives in `client/` rather than being merged into the backend root. This separates concerns at the project level — different dependencies, different build tools, and the option to deploy frontend and backend independently (e.g. Vercel + Railway). The trade-off is two `package.json` files to maintain.
-
-**One thing I found surprising**
-shadcn's `init` command reads `tsconfig.json` directly and does not follow TypeScript `references` into `tsconfig.app.json`. Adding `paths` to `tsconfig.app.json` (correct for TypeScript) is not enough — shadcn won't see it. The fix is to set explicit `src/` paths in `components.json` so shadcn writes files to the right place without needing alias resolution.
-
-**Interview Q&A**
-
-Q: Why Vite instead of Create React App?
-A: CRA is unmaintained and bundles everything upfront. Vite serves ES modules directly to the browser in dev — it only compiles what's actually requested, which is why cold starts are near-instant.
-
-Q: What's the difference between shadcn/ui and a library like Material UI?
-A: shadcn copies source files into your project — you own them and can modify anything. MUI ships a package you import and customize against its API. The trade-off with shadcn is that upstream updates aren't automatic; you'd need to manually re-add or patch components.
-
-Q: How do you make API calls from a React dev server to an Express backend without CORS errors?
-A: Configure a proxy in Vite's dev server. Requests to `/api/*` get forwarded to `localhost:3000` server-side, so the browser only ever sees one origin. No CORS because the browser never makes a cross-origin request.
