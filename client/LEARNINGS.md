@@ -43,3 +43,47 @@ A: Auth pages have their own visual shell — a centered card with no nav. Placi
 
 Q: What's the difference between `<Link>` and `<a href>` in a React app?
 A: `<Link>` uses the History API to update the URL client-side — React Router intercepts it and swaps the component without a network request. `<a href>` triggers a full browser navigation, reloading `index.html` and re-booting the entire React app.
+
+## Phase 13 — Movies Page (TMDb API + data fetching)
+
+**What this module does**
+`MoviesPage` fetches now-playing movies from the TMDb API on mount and renders them in a responsive grid. `src/api/tmdb.ts` encapsulates all TMDb fetch logic — the component only calls named functions and doesn't know about URLs or API keys. The API key is stored in `client/.env` as `VITE_TMDB_API_KEY` and read via `import.meta.env`.
+
+**Key design decision**
+Data fetching lives in `src/api/tmdb.ts` rather than directly in the component. This separation means the component only handles rendering — if the TMDb URL or auth method changes, only the API file needs updating. It also makes the fetch logic reusable across multiple pages.
+
+**One thing I found surprising**
+`useEffect` callbacks cannot be `async`. React expects the callback to return either nothing or a cleanup function — an async function always returns a Promise, which React ignores and which breaks cleanup. The fix is to define an inner async function inside the effect and call it immediately.
+
+**Interview Q&A**
+
+Q: Why can't you make the `useEffect` callback itself async?
+A: React expects `useEffect` to return either nothing or a cleanup function. An async function always returns a Promise — React doesn't know what to do with it, and cleanup breaks. The pattern is to define an inner async function inside the effect and call it immediately.
+
+Q: Why use three separate `useState` calls instead of one state object?
+A: Separate state means independent updates — setting `isLoading` doesn't risk stale data in `movies`. With one object you need `setState(prev => ({ ...prev, loading: false }))` every time, which is more verbose and easier to get wrong. Separate state is simpler at this scale.
+
+Q: What's the difference between `(err as Error).message` and `err instanceof Error ? err.message : 'fallback'`?
+A: `as Error` is a TypeScript cast — it tells the compiler to trust you, but if the thrown value isn't actually an Error (e.g. a string), you get a runtime crash. `instanceof Error` is a real runtime check that's safe regardless of what was thrown. Always prefer `instanceof`.
+
+## Phase 14 — Movie Detail Page
+
+**What this module does**
+`MovieDetailPage` reads the `:id` URL param via `useParams`, fetches that specific movie from TMDb's `/movie/:id` endpoint, and displays the poster, title, genres, runtime, rating, overview, and a "Buy Tickets" button that navigates to the showtime picker.
+
+**Key design decision**
+`MovieDetail` extends the `Movie` interface rather than duplicating fields. The detail endpoint returns a superset of the list endpoint's data — `extends` makes the relationship explicit and keeps the type definitions DRY.
+
+**One thing I found surprising**
+Removing the `if (!movie) return null` guard doesn't cause a loading state — it causes a runtime crash. `movie` starts as `null`, and JSX immediately tries to access `movie.title`, throwing `Cannot read properties of null`. The guard order also matters: error check must come before the null check, otherwise an error state silently returns null instead of showing the error message.
+
+**Interview Q&A**
+
+Q: What does the `!` non-null assertion do and when is it unsafe?
+A: `id!` tells TypeScript the value is definitely not undefined — it silences the type error without a runtime check. It's unsafe if you're wrong. Here it's safe because the route definition `/movies/:id` guarantees `id` is always present, but the explicit guard `if (!id) return null` is the safer production pattern.
+
+Q: Why does the useEffect dependency array contain `[id]` instead of `[]`?
+A: With `[]`, the effect only runs once on mount. If the user navigates from `/movies/550` to `/movies/680` without unmounting the component, the effect won't re-run and the old movie stays on screen. `[id]` re-runs the fetch whenever the id changes.
+
+Q: What happens if you remove the `if (!movie) return null` guard?
+A: The JSX immediately tries to access properties on `null` (e.g. `movie.title`), throwing a runtime error — not a loading state. React catches it and renders a blank screen or triggers an error boundary.
