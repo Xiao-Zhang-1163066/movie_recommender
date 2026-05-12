@@ -87,3 +87,25 @@ A: With `[]`, the effect only runs once on mount. If the user navigates from `/m
 
 Q: What happens if you remove the `if (!movie) return null` guard?
 A: The JSX immediately tries to access properties on `null` (e.g. `movie.title`), throwing a runtime error — not a loading state. React catches it and renders a blank screen or triggers an error boundary.
+
+## Phase 15 — Showtime Picker
+
+**What this module does**
+`ShowtimesPage` reads the movie ID from the URL param, shows a `DatePicker` component (a row of day buttons), and filters the mock cinema list to show only cinemas that have sessions for that movie on the selected date. Clicking a session time navigates to the Cinema Detail page with the movie ID passed as a query param.
+
+**Key design decision**
+Session times are derived state — computed from `sessions[cinemaId][movieId][date]` on every render rather than stored in `useState`. This means they can never be stale. The `.filter().map()` chain keeps filtering and rendering as separate concerns, though computing `times` twice is a known trade-off. At scale, `flatMap` into `{ cinema, times }` objects avoids the double computation.
+
+**One thing I found surprising**
+After filtering cinemas to only those with sessions, the `times.length === 0` check inside `.map()` becomes dead code — the filter already guarantees times exist. Leaving it in is misleading; removing it makes the intent clearer.
+
+**Interview Q&A**
+
+Q: Why store selected date in `useState` but derive session times from it rather than storing them too?
+A: Storing derived data creates a sync problem — two sources of truth that can get out of step. Computing times directly from the selected date means they can never be stale: one source of truth, always correct.
+
+Q: You compute `times` twice — once in `.filter()` and once in `.map()`. How would you fix this at scale?
+A: Use `flatMap` to build `{ cinema, times }` objects in one pass, filtering out empty times in the same step. Then `.map()` over the result — each entry already has `times` computed with no double lookup.
+
+Q: What does optional chaining (`?.`) do in `sessions[cinema.id]?.[id!]?.[selectedDate]`?
+A: It short-circuits and returns `undefined` if any key in the chain is missing, instead of throwing `Cannot read properties of undefined`. Without it, a cinema or movie ID missing from the sessions object crashes the page.
