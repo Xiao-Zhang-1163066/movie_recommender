@@ -109,3 +109,22 @@ A: Use `flatMap` to build `{ cinema, times }` objects in one pass, filtering out
 
 Q: What does optional chaining (`?.`) do in `sessions[cinema.id]?.[id!]?.[selectedDate]`?
 A: It short-circuits and returns `undefined` if any key in the chain is missing, instead of throwing `Cannot read properties of undefined`. Without it, a cinema or movie ID missing from the sessions object crashes the page.
+
+## Phase 16 — Cinemas Page
+
+**What this module does**
+`CinemasPage` imports a local mock array from `src/data/cinemas.ts` and renders it as a responsive card grid. Each `CinemaCard` wraps a shadcn `Card` in a React Router `<Link>`, navigating to `/cinemas/:id` on click. No async, no loading state — the data is static and available immediately.
+
+**Key design decision**
+Cinema data comes from a local mock array rather than a database fetch. No free global cinema API exists, and seeding a real cinema database is out of scope for an MVP. The mock data shape (`id`, `name`, `suburb`, `screens`) mirrors the Prisma `Cinema` model exactly — swapping in a real API call later is a one-component change.
+
+**One thing I found surprising**
+TypeScript interfaces are erased at compile time — they don't exist in the JavaScript the browser receives. Vite compiles files in isolation using esbuild, so a plain `import { Cinema }` can cause a runtime error even though the TypeScript editor shows no warning. The fix is `import type { Cinema }`, which explicitly marks the import as type-only so both TypeScript and Vite know to erase it safely.
+
+**Interview Q&A**
+
+Q: Why use `import type` instead of a regular `import` for a TypeScript interface?
+A: TypeScript interfaces don't exist at runtime — they're erased during compilation. Vite compiles files in isolation and can't always tell a plain import is type-only. `import type` makes it explicit: the compiler and bundler both know to erase it, preventing a runtime "module does not provide an export" error.
+
+Q: `CinemaCard` accepts `cinema: Cinema` as a single prop. When would you pass fields individually instead?
+A: Individual props make sense when a component is general-purpose and could receive data from multiple different types — it documents exactly what the component needs. A single object prop is better when the component is always tied to one specific type, as it's less verbose at the call site and the interface is the single source of truth. The performance difference is negligible either way.
