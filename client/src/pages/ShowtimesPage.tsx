@@ -26,23 +26,20 @@ function ShowtimesPage() {
             const times = sessions[cinema.id]?.[id!]?.[selectedDate] ?? [];
 
             return (
-              <div key={cinema.id} className="p-4 border rounded">
+              <div
+                key={cinema.id}
+                className="p-4 border rounded"
+                onClick={() => navigate(`/cinemas/${cinema.id}?movieId=${id}`)}
+              >
                 <h2 className="text-xl font-semibold">{cinema.name}</h2>
                 <p className="text-gray-500">{cinema.suburb}</p>
                 {times.map((time) => (
-                  <Button
+                  <span
                     key={time}
-                    variant="outline"
-                    size="xs"
-                    className="mr-2 mt-2"
-                    onClick={() =>
-                      navigate(
-                        `/cinemas/${cinema.id}?movieId=${id}&time=${time}`,
-                      )
-                    }
+                    className="me-2 inline-flex items-center mt-2 px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm"
                   >
                     {time}
-                  </Button>
+                  </span>
                 ))}
               </div>
             );

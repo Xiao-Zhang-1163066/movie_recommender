@@ -128,3 +128,25 @@ A: TypeScript interfaces don't exist at runtime — they're erased during compil
 
 Q: `CinemaCard` accepts `cinema: Cinema` as a single prop. When would you pass fields individually instead?
 A: Individual props make sense when a component is general-purpose and could receive data from multiple different types — it documents exactly what the component needs. A single object prop is better when the component is always tied to one specific type, as it's less verbose at the call site and the interface is the single source of truth. The performance difference is negligible either way.
+
+## Phase 17 — Cinema Detail Page
+
+**What this module does**
+`CinemaDetailPage` fetches all movies showing at a cinema using `Promise.all`, displays them as a clickable poster row, and shows session times for the selected movie on the selected date. Selecting a new movie resets the date to today. If no sessions exist on the selected date, a "Check another date" button jumps to the next available date derived from the sessions data.
+
+**Key design decision**
+`cinemaSessions`, `sessionTimes`, `allTmdbIds`, and `nextDate` are all computed directly in the component body rather than stored in `useState`. These are derived state — values that can be computed from existing state and static data. Storing them in state would create two sources of truth that could fall out of sync. Recomputing them on every render is correct and fast because the input arrays are tiny (2–4 items).
+
+**One thing I found surprising**
+`useState(initialValue)` only reads its initial value once — on first mount. Query param changes via React Router client-side navigation do not remount the component if the route's `:id` param stays the same, so `useState` won't re-initialise. The robust fix is a `useEffect` that syncs the query param to state: `useEffect(() => { setSelectedTmdbId(tmdbMovieId); }, [tmdbMovieId])`.
+
+**Interview Q&A**
+
+Q: When would you use `useMemo` for derived values like `sessionTimes` or `nextDate`?
+A: Only when the computation is measurably expensive or when the result is passed as a prop to a memoized child and referential stability matters. `useMemo` has its own overhead — storing and comparing previous results. For O(n) operations on 2–4 items it can be slower than just recomputing. The React team's guidance: don't memoize until you can measure a problem.
+
+Q: `useState(tmdbMovieId)` initialises selected movie from the query param. What breaks if the component stays mounted and the query param changes?
+A: `useState` ignores the new initial value — it only reads it on first mount. If React Router keeps the component mounted (same `:id` param, different query param), `selectedTmdbId` stays at the old value and the pre-selection silently breaks. The fix is `useEffect(() => { setSelectedTmdbId(tmdbMovieId); }, [tmdbMovieId])` to re-sync whenever the param changes.
+
+Q: Why use `Promise.all` instead of sequential awaits to fetch movie details?
+A: Sequential awaits fetch one movie, wait for it, then fetch the next — total time is the sum of all requests. `Promise.all` fires all fetches in parallel and resolves when the last one completes — total time is the slowest single request. For 4 movies, `Promise.all` is roughly 4x faster.
