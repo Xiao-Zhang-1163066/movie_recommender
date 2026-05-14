@@ -151,7 +151,7 @@ export const chat = async (req, res, next) => {
     };
 
     const result = streamText({
-      model: groq("llama-3.3-70b-versatile"),
+      model: groq("openai/gpt-oss-120b"),
       messages,
       tools,
       stopWhen: stepCountIs(5),

@@ -237,3 +237,30 @@ A: An infinite tool-calling loop. Without a limit, a model that keeps calling to
 
 Q: `search_movies` returns TMDB IDs but `get_showtimes` queries our database by UUID. What problem does this cause and how would you fix it?
 A: The agent would pass a TMDB integer ID to `get_showtimes`, which queries `Session.movieId` — a UUID referencing our own `Movie` table. The query silently returns nothing. The fix is to add a `tmdbId` field to the `Movie` model so `get_showtimes` can first look up the local UUID from the TMDB ID before querying sessions.
+
+---
+
+## Phase 18 — Chat UI with SSE Streaming
+
+**What this module does**
+A React page that drives the agentic chat experience. It owns the conversation history in state, POSTs the full message array to `/api/chat` on every send, and reads the server's streaming response chunk by chunk via `response.body.getReader()`. As chunks arrive, a temporary "streaming" bubble updates in real time; when the stream closes, the completed text moves into the permanent message list.
+
+**Key design decision**
+Two pieces of state for one piece of content: `streamingText` (a growing string while the response is in flight) and `messages` (the array of completed turns). The streaming bubble and the message list render the same content but at different lifecycle stages — one is temporary, one is permanent. When the stream ends, the same render cycle pushes the completed text into `messages` and clears `streamingText`, so the temporary bubble vanishes and the permanent message appears seamlessly. Trying to manage this with a single state would require either rewriting the last message in place on every chunk (more re-renders, more complexity) or buffering everything until done (no live streaming effect).
+
+**One thing I found surprising**
+The Vite proxy does **not** strip the matching prefix by default. `{ "/api": "http://localhost:3000" }` forwards `/api/chat` to `http://localhost:3000/api/chat` — including the `/api` prefix — so a backend mounted at `/chat` returns 404. You need an explicit `rewrite: (path) => path.replace(/^\/api/, "")` to strip it. This is the opposite of how the Next.js `rewrites` config works, which is why people get caught out.
+
+**Interview Q&A**
+
+Q: Why use `fetch` + `response.body.getReader()` instead of `axios` for the streaming response?
+A: `axios` buffers the entire response before resolving the promise — fine for JSON, but it destroys the streaming effect because the user sees nothing until the full response arrives. Streaming requires access to the raw `ReadableStream` on `response.body`, which only the native `fetch` API exposes. The reader's `read()` loop yields chunks as they arrive over the wire, which is what enables the token-by-token "typewriter" UX.
+
+Q: Why does `sendMessage` build `updatedMessages` as a local variable instead of calling `setMessages` and then reading `messages` directly in the `fetch` body?
+A: `setMessages` is asynchronous — it schedules a re-render rather than updating immediately. Within the same function call, `messages` is still the old array (a stale closure). If you read it in the `fetch` body, you'd send the conversation history without the user's most recent message, and the AI would have no idea what was just asked. Building `updatedMessages` as a local variable and passing it both to `setMessages` and to `fetch` ensures both see the same complete array.
+
+Q: Why is `assistantMessage` declared with `let`, and what's the difference between mutating the variable and mutating the string?
+A: `let` allows reassignment, which is required because `assistantMessage += chunkText` reassigns the variable on every chunk. The string itself isn't mutated — strings in JavaScript are immutable — each `+=` creates a brand new string and points the variable at it. `const` would block the reassignment and crash on the first chunk. The general rule: `const` by default, `let` only when reassignment is required (accumulators, counters, loop-mutated state).
+
+Q: While streaming, the user sees the response building up word by word. When the stream finishes, the words don't flicker or disappear — they stay on screen and move into the message list. Walk through the exact state changes that make this transition seamless.
+A: During streaming, `streamingText` grows chunk by chunk and the JSX renders `{streamingText && <div>...</div>}` as a temporary bubble. `messages` does not yet contain the assistant turn. When `reader.read()` returns `done: true`, two `setState` calls happen synchronously: `setMessages(prev => [...prev, { role: "assistant", content: assistantMessage }])` and `setStreamingText("")`. React batches them into a single re-render. After that render, `messages` contains the completed turn (rendered as a normal message) and `streamingText` is empty (so the conditional bubble renders nothing). The temporary bubble disappears and the permanent message appears in the same frame, with identical text and styling — so visually nothing jumps.
