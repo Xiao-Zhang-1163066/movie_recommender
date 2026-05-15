@@ -1,12 +1,14 @@
 import { createContext, useContext, useEffect, useState } from "react";
 type AuthContextType = {
   isAuthenticated: boolean;
+  isLoading: boolean;
   login: () => void;
   logout: () => Promise<void>;
 };
 const AuthContext = createContext<AuthContextType | null>(null);
 function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   useEffect(() => {
     // step 1: on mount, make a GET request to /api/auth/me with credentials: "include"
     const checkAuth = async () => {
@@ -23,6 +25,8 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
       } catch (error) {
         console.error("Error checking auth:", error);
         setIsAuthenticated(false);
+      } finally {
+        setIsLoading(false); // always runs, success or failure
       }
     };
     checkAuth();
@@ -46,6 +50,7 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
     <AuthContext.Provider
       value={{
         isAuthenticated,
+        isLoading,
         login,
         logout,
       }}

@@ -315,3 +315,27 @@ A: An empty array means "run once on mount, never again." Without the array, Rea
 
 Q: `ProtectedRoute` uses `<Navigate to="/login" replace />` instead of just `<Navigate to="/login" />`. What does `replace` prevent?
 A: Without `replace`, React Router pushes the protected route (e.g. `/chat`) onto the browser history stack before redirecting to `/login`. When the user hits the back button they'd go back to `/chat`, which immediately redirects to `/login` again — a confusing loop. `replace` swaps `/chat` out of the history stack entirely, so the back button skips it cleanly.
+
+---
+
+## Phase 21 — Auth Loading State
+
+**What this module does**
+Adds an `isLoading` boolean to `AuthContext` to prevent `ProtectedRoute` from redirecting to `/login` before the `checkAuth` request has settled. While `isLoading` is `true`, `ProtectedRoute` renders a loading indicator instead of making an allow/deny decision. Once `checkAuth` completes — success or failure — `isLoading` becomes `false` and the route renders correctly.
+
+**Key design decision**
+`isLoading` starts as `true`, not `false`. If it started `false`, `ProtectedRoute` would see `isAuthenticated: false` on the very first render (before `checkAuth` gets a response) and redirect to `/login` — even for logged-in users. Starting at `true` forces the route to wait. This is the standard pattern for async state initialisation: assume "not ready" until the async operation settles.
+
+**One thing I found surprising**
+Setting `isLoading(false)` in both the `if` and `else` branches looks complete, but misses the `catch` branch — a network failure leaves `isLoading` stuck at `true` forever. A `finally` block is the correct fix: it always runs regardless of which path the code took, so you can't miss a branch.
+
+**Interview Q&A**
+
+Q: Why does `isLoading` start as `true` instead of `false`?
+A: The auth check is already running the moment `AuthProvider` mounts. Starting at `false` would let `ProtectedRoute` see `isLoading: false, isAuthenticated: false` on the first render and redirect to `/login` before the result is known. Starting at `true` forces `ProtectedRoute` to wait until `checkAuth` settles before making a decision.
+
+Q: `ProtectedRoute` renders `<div>Loading...</div>` while `isLoading` is true. A teammate suggests returning `null` instead. What's the difference?
+A: Both prevent a premature redirect — they just differ in UX. `null` renders nothing (blank screen) while the check runs. `<div>Loading...</div>` shows visible feedback. For a fast auth check on localhost the difference is imperceptible, but in production with real latency a spinner or skeleton is better UX. The key requirement is that neither renders `<Navigate>` — you're just buying time for the async check to settle.
+
+Q: Why use `finally` to call `setIsLoading(false)` instead of putting it in both the `if` and `else` branches?
+A: `finally` always runs regardless of which code path was taken — success, expected failure, or thrown exception. Without it you have to remember to set `isLoading(false)` in every branch manually, and it's easy to miss one. A missing `setIsLoading(false)` in the `catch` block means a network failure leaves the app showing "Loading..." forever. One `finally` line is safer and less code than three separate assignments.
