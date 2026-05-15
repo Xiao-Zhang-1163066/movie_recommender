@@ -264,3 +264,30 @@ A: `let` allows reassignment, which is required because `assistantMessage += chu
 
 Q: While streaming, the user sees the response building up word by word. When the stream finishes, the words don't flicker or disappear — they stay on screen and move into the message list. Walk through the exact state changes that make this transition seamless.
 A: During streaming, `streamingText` grows chunk by chunk and the JSX renders `{streamingText && <div>...</div>}` as a temporary bubble. `messages` does not yet contain the assistant turn. When `reader.read()` returns `done: true`, two `setState` calls happen synchronously: `setMessages(prev => [...prev, { role: "assistant", content: assistantMessage }])` and `setStreamingText("")`. React batches them into a single re-render. After that render, `messages` contains the completed turn (rendered as a normal message) and `streamingText` is empty (so the conditional bubble renders nothing). The temporary bubble disappears and the permanent message appears in the same frame, with identical text and styling — so visually nothing jumps.
+
+---
+
+## Phase 19 — Login & Register Pages
+
+**What this module does**
+Two form pages that let users create an account and sign in. Each POSTs credentials to the backend auth routes. On success the server sets an httpOnly `jwt` cookie via `Set-Cookie` and the page redirects to `/movies`. On failure the server's error message is displayed inline. The pages are outside the `<Layout />` route so they render full-screen without the nav bar.
+
+**Key design decision**
+Auth is handled via httpOnly cookies rather than storing the JWT in `localStorage`. The frontend never reads or touches the token — the browser stores it and attaches it automatically to every subsequent request. This is safer than `localStorage` because JavaScript cannot access httpOnly cookies, so an XSS attack cannot steal the token. The tradeoff is that `credentials: "include"` must be set on every `fetch` call, and the backend must configure CORS with `credentials: true` and a specific origin (not a wildcard).
+
+**One thing I found surprising**
+`fetch` does not send or accept cookies by default on cross-origin requests. Without `credentials: "include"`, the browser silently ignores the `Set-Cookie` header in the login response — the cookie is never stored and every protected route returns 401. This is the single most common reason auth "doesn't work" after login.
+
+**Interview Q&A**
+
+Q: What does `credentials: "include"` do, and what happens if you leave it out?
+A: It tells the browser to include cookies in the request and to store any `Set-Cookie` headers from the response. Without it, `fetch` ignores `Set-Cookie` entirely — the JWT cookie is never stored and every subsequent request to a protected route returns 401. It's required even when Vite proxies the request in dev, because in production the frontend and backend often live on different origins.
+
+Q: Your login form uses `type="email"` and `required` on its inputs. What's the advantage over validating in JavaScript, and why isn't it enough on its own?
+A: HTML5 attributes give free validation with built-in UX — the browser shows its own error tooltip, blocks form submission, and `handleSubmit` never runs. Zero validation code required. The limit is that browser validation is trivially bypassed via devtools, so it's a convenience for honest users, not a security guarantee. The real safety net is server-side Zod validation, which can't be bypassed from the client.
+
+Q: After a successful login, `navigate("/movies")` switches pages without a full page reload. How does React Router make that work?
+A: React Router listens to the browser's History API (`window.history.pushState`). Calling `navigate("/movies")` updates the URL in the address bar without a network request, then React Router looks up which component matches `/movies` in the `<Routes>` tree and re-renders it inside `<Outlet />`. No HTML is fetched from the server — it's a local JavaScript re-render triggered by a URL change.
+
+Q: Why store the JWT in an httpOnly cookie instead of localStorage?
+A: localStorage is readable by any JavaScript on the page — an XSS attack can steal the token with one line of code. httpOnly cookies are invisible to JavaScript (`document.cookie` doesn't show them), so even if an attacker injects a script, they can't read the token. The browser also attaches cookies automatically on every request, so you don't have to manually add an `Authorization` header everywhere. The tradeoff is CSRF — cookies are sent automatically on cross-site requests too, which an attacker can exploit. The fix is the `SameSite=Strict` or `SameSite=Lax` cookie attribute, which tells the browser not to send the cookie on requests initiated from other sites.
