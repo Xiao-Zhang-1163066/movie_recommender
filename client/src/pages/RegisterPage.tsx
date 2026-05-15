@@ -1,3 +1,4 @@
+import { useAuth } from "@/context/AuthContext";
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 
@@ -7,6 +8,7 @@ function RegisterPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const { login } = useAuth();
 
   async function handleSubmit(e: React.FormEvent) {
     // step 1: prevent the default browser form submission
@@ -27,6 +29,7 @@ function RegisterPage() {
       const data = await response.json();
       setError(data.error || "Register failed");
     } else {
+      login();
       navigate("/movies");
     }
   }

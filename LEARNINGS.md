@@ -291,3 +291,27 @@ A: React Router listens to the browser's History API (`window.history.pushState`
 
 Q: Why store the JWT in an httpOnly cookie instead of localStorage?
 A: localStorage is readable by any JavaScript on the page — an XSS attack can steal the token with one line of code. httpOnly cookies are invisible to JavaScript (`document.cookie` doesn't show them), so even if an attacker injects a script, they can't read the token. The browser also attaches cookies automatically on every request, so you don't have to manually add an `Authorization` header everywhere. The tradeoff is CSRF — cookies are sent automatically on cross-site requests too, which an attacker can exploit. The fix is the `SameSite=Strict` or `SameSite=Lax` cookie attribute, which tells the browser not to send the cookie on requests initiated from other sites.
+
+---
+
+## Phase 20 — Auth Context + Protected Routes
+
+**What this module does**
+A React Context (`AuthContext`) that makes auth state — `isAuthenticated`, `login`, `logout` — available to every component in the tree without prop drilling. On mount, the provider calls `GET /api/auth/me` to check if a valid JWT cookie exists. `login()` and `logout()` update the state immediately so the UI reacts without a page reload. A `ProtectedRoute` component uses the context to guard routes — rendering `<Outlet />` for authenticated users or redirecting to `/login` for everyone else.
+
+**Key design decision**
+Auth state lives in React Context rather than in a parent component or global store like Redux. Context is the right tool here because auth state is genuinely global — the nav bar, protected routes, and individual pages all need it — but it doesn't change frequently, so the performance cost of context re-renders is negligible. A global store would add boilerplate (actions, reducers, selectors) with no real benefit for a single boolean flag.
+
+**One thing I found surprising**
+The frontend can't read the JWT to check auth status because httpOnly cookies are invisible to JavaScript — `document.cookie` doesn't list them. The only way to check if the user is logged in is to ask the server via `GET /api/auth/me`. If the cookie is present and valid, the server returns 200; otherwise 401. The 401 on page load (when not logged in) is expected behaviour, not an error.
+
+**Interview Q&A**
+
+Q: Why does `AuthProvider` call `GET /api/auth/me` on mount instead of just reading `document.cookie` to check if the JWT exists?
+A: httpOnly cookies are intentionally hidden from JavaScript — `document.cookie` doesn't list them. That's the security point: even if an attacker injects a script via XSS, they can't read the token. The only way to verify auth status is to ask the server, which can read the cookie directly from the request headers.
+
+Q: The `checkAuth` `useEffect` has an empty dependency array `[]`. What does that mean, and what would happen if you left it out?
+A: An empty array means "run once on mount, never again." Without the array, React runs the effect after every render — `checkAuth` would fire every time any state changes anywhere in the app, sending continuous auth requests to the backend in an infinite loop.
+
+Q: `ProtectedRoute` uses `<Navigate to="/login" replace />` instead of just `<Navigate to="/login" />`. What does `replace` prevent?
+A: Without `replace`, React Router pushes the protected route (e.g. `/chat`) onto the browser history stack before redirecting to `/login`. When the user hits the back button they'd go back to `/chat`, which immediately redirects to `/login` again — a confusing loop. `replace` swaps `/chat` out of the history stack entirely, so the back button skips it cleanly.

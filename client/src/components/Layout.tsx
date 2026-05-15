@@ -1,7 +1,9 @@
+import { useAuth } from "@/context/AuthContext";
 import { Link, Outlet, useLocation } from "react-router-dom";
 
 const Layout = () => {
   const { pathname } = useLocation();
+  const { isAuthenticated, logout } = useAuth();
   return (
     <div>
       <nav>
@@ -23,6 +25,16 @@ const Layout = () => {
         >
           Chat
         </Link>
+        {isAuthenticated ? (
+          <button onClick={logout}>Logout</button>
+        ) : (
+          <Link
+            to="/login"
+            className={pathname === "/login" ? "font-bold" : "text-gray-500"}
+          >
+            Login
+          </Link>
+        )}
       </nav>
       <main>
         <Outlet />
