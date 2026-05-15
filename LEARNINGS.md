@@ -339,3 +339,27 @@ A: Both prevent a premature redirect — they just differ in UX. `null` renders 
 
 Q: Why use `finally` to call `setIsLoading(false)` instead of putting it in both the `if` and `else` branches?
 A: `finally` always runs regardless of which code path was taken — success, expected failure, or thrown exception. Without it you have to remember to set `isLoading(false)` in every branch manually, and it's easy to miss one. A missing `setIsLoading(false)` in the `catch` block means a network failure leaves the app showing "Loading..." forever. One `finally` line is safer and less code than three separate assignments.
+
+---
+
+## Phase 22 — Watchlist Page
+
+**What this module does**
+A protected page that fetches the logged-in user's watchlist from `GET /api/watchlist` and displays each item with its movie title, status badge, and optional rating. The page handles three states: loading, error, and empty list. It is protected by `ProtectedRoute` so only authenticated users can access it.
+
+**Key design decision**
+The frontend sends no user ID in the request — it relies entirely on the `jwt` cookie being attached automatically by the browser. The `protect` middleware reads the cookie, verifies the JWT, and populates `req.user`. The controller reads `req.user.id` to scope the query. This is the cookie-based auth pattern in action: identity is proven by the cookie, not by anything the frontend explicitly sends.
+
+**One thing I found surprising**
+The backend wraps the array in `{ status: "success", data: { watchlist: [...] } }` rather than returning the array directly. This means `setItems(data)` silently sets items to an object — `items.map` throws because objects don't have a `map` method. You have to destructure to the correct path: `data.data.watchlist`. Always log the raw response shape when a `.map is not a function` error appears — the data is there, just nested differently than expected.
+
+**Interview Q&A**
+
+Q: The watchlist fetch doesn't include a user ID anywhere. How does the backend know whose watchlist to return?
+A: The browser automatically sends the `jwt` cookie with every request to the same domain. The `protect` middleware reads it, verifies the JWT, and attaches the decoded user to `req.user`. The controller reads `req.user.id` to filter results. The frontend never identifies the user explicitly — the cookie proves identity automatically.
+
+Q: The backend returns `{ status, data: { watchlist } }` instead of a plain array. What's the advantage and the cost?
+A: The envelope pattern gives every endpoint a consistent shape — easier to handle errors uniformly and add fields like pagination later without breaking consumers. The cost is that the frontend must know the nesting path to reach the actual data, which is easy to get wrong and adds destructuring boilerplate.
+
+Q: Why check `err instanceof Error` before reading `err.message` instead of just writing `setError(err.message)` directly?
+A: In JavaScript you can throw anything — a string, a number, a plain object. TypeScript types `catch (err)` as `unknown` for this reason. If the thrown value isn't an `Error` instance, `.message` is `undefined` and you'd display nothing. The `instanceof Error` check narrows the type so `.message` is guaranteed to exist. The fallback handles anything that isn't an `Error`.

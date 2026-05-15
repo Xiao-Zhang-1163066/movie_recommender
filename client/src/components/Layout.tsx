@@ -25,6 +25,12 @@ const Layout = () => {
         >
           Chat
         </Link>
+        <Link
+          to="/watchlist"
+          className={pathname === "/watchlist" ? "font-bold" : "text-gray-500"}
+        >
+          Watchlist
+        </Link>
         {isAuthenticated ? (
           <button onClick={logout}>Logout</button>
         ) : (

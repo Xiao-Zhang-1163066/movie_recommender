@@ -11,6 +11,7 @@ import RegisterPage from "./pages/RegisterPage";
 import PageNotFound from "./pages/PageNotFound";
 import { AuthProvider } from "./context/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
+import WatchlistPage from "./pages/WatchListPage";
 
 function App() {
   return (
@@ -26,6 +27,7 @@ function App() {
             <Route path="/cinemas/:id" element={<CinemaDetailPage />} />
             <Route element={<ProtectedRoute />}>
               <Route path="/chat" element={<ChatPage />} />
+              <Route path="/watchlist" element={<WatchlistPage />} />
             </Route>
           </Route>
           <Route path="/login" element={<LoginPage />} />
