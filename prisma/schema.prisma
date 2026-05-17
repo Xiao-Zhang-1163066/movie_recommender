@@ -26,6 +26,7 @@ model User {
 
 model Movie {
   id          String   @id @default(uuid())
+  tmdbId      Int?     @unique
   title       String
   overview    String?
   releaseYear Int
