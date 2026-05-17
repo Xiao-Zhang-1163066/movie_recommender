@@ -55,6 +55,7 @@ def upsert_cinema(conn, cinema: dict):
     conn.commit()
 
 def get_cinema_id(conn, slug):
+    # look up the cinema's internal UUID by its slug (e.g. "alice-cinema")
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cursor.execute('SELECT id FROM "Cinema" WHERE slug = %s', (slug,))
     row = cursor.fetchone()
@@ -63,6 +64,8 @@ def get_cinema_id(conn, slug):
     return row['id']
 
 def ensure_system_user(conn):
+    # Movie.createdBy is a required FK — the scraper needs a user to own movies it creates.
+    # We use a fixed system account rather than a real user.
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     email = 'system@movie-mate.internal'
     cursor.execute('SELECT id FROM "User" WHERE email = %s', (email,))
@@ -72,17 +75,21 @@ def ensure_system_user(conn):
     user_id = str(uuid.uuid4())
     cursor.execute(
         'INSERT INTO "User" (id, name, email, password) VALUES (%s, %s, %s, %s)',
+        # password value can never match a bcrypt hash, so this account can never log in
         (user_id, 'System', email, 'SYSTEM_USER_NOT_FOR_LOGIN')
     )
     conn.commit()
     return user_id
 
 def fetch_tmdb_movie(title):
+    # step 1: search by title → get the TMDB ID of the top result
     r = requests.get(f'{TMDB_BASE}/search/movie', params={'api_key': TMDB_API_KEY, 'query': title})
     results = r.json().get('results', [])
     if not results:
         return None
     tmdb_id = results[0]['id']
+
+    # step 2: fetch full details — search results only include genre IDs, not names or runtime
     r2 = requests.get(f'{TMDB_BASE}/movie/{tmdb_id}', params={'api_key': TMDB_API_KEY})
     movie = r2.json()
     release_year = int(movie['release_date'][:4]) if movie.get('release_date') else datetime.now().year
@@ -101,6 +108,7 @@ def find_or_create_movie(conn, tmdb_data, system_user_id):
     cursor.execute("""
         INSERT INTO "Movie" (id, title, overview, "releaseYear", genres, runtime, "posterUrl", "createdBy", "tmdbId")
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        -- if this TMDB movie already exists in our DB, update its metadata instead of inserting a duplicate
         ON CONFLICT ("tmdbId") DO UPDATE SET
             title       = EXCLUDED.title,
             overview    = EXCLUDED.overview,
@@ -108,6 +116,7 @@ def find_or_create_movie(conn, tmdb_data, system_user_id):
             genres      = EXCLUDED.genres,
             runtime     = EXCLUDED.runtime,
             "posterUrl" = EXCLUDED."posterUrl"
+        -- RETURNING gives us back the row's id whether we inserted or updated
         RETURNING id
     """, (
         str(uuid.uuid4()),
@@ -125,12 +134,17 @@ def find_or_create_movie(conn, tmdb_data, system_user_id):
     return row['id']
 
 def to_utc(naive_dt, tz_str='Pacific/Auckland'):
+    # Alice Cinema times are NZ local time — attach the timezone then convert to UTC for storage.
+    # strip tzinfo at the end because Postgres TIMESTAMP (without timezone) expects naive datetimes.
     local_dt = naive_dt.replace(tzinfo=ZoneInfo(tz_str))
     return local_dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 def replace_sessions(conn, cinema_id, sessions):
     cursor = conn.cursor()
     now = datetime.now(timezone.utc).replace(tzinfo=None)
+    # delete all future sessions for this cinema before re-inserting fresh ones.
+    # this "replace on refresh" pattern is simpler than per-row upsert and keeps the
+    # DB in sync with whatever the website currently shows.
     cursor.execute('DELETE FROM "Session" WHERE "cinemaId" = %s AND "startsAt" > %s', (cinema_id, now))
     for s in sessions:
         cursor.execute("""
