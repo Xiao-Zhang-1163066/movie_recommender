@@ -363,3 +363,30 @@ A: The envelope pattern gives every endpoint a consistent shape — easier to ha
 
 Q: Why check `err instanceof Error` before reading `err.message` instead of just writing `setError(err.message)` directly?
 A: In JavaScript you can throw anything — a string, a number, a plain object. TypeScript types `catch (err)` as `unknown` for this reason. If the thrown value isn't an `Error` instance, `.message` is `undefined` and you'd display nothing. The `instanceof Error` check narrows the type so `.message` is guaranteed to exist. The fallback handles anything that isn't an `Error`.
+
+---
+
+## Phase 23 — Python Scraper (Alice Cinema)
+
+**What this module does**
+A Python scraping service in `scraper/` that fetches session times from Alice Cinema's website and writes Cinema and Session rows into the shared PostgreSQL database. It runs independently of the Node.js backend. The pipeline: fetch homepage → find movie slugs → fetch each movie page → parse date/time/booking URL → resolve movie via TMDB API → write sessions to DB.
+
+**Key design decision**
+The scraper connects directly to Postgres instead of calling the Express API. The API is built for external clients (browsers) and enforces user auth and rate limits. The scraper is a trusted internal service that needs bulk writes and bypasses those layers legitimately. Direct DB access is faster, simpler, and the right call for infrastructure-level services.
+
+**One thing I found surprising**
+Prisma generates UUIDs and timestamps client-side, not in the database. The `id` column in the Prisma migration has no `DEFAULT` — so raw SQL inserts must provide the UUID manually using Python's `uuid.uuid4()`. The same applies to `updatedAt`. Without checking the migration SQL, you'd assume the DB handles these automatically.
+
+**Interview Q&A**
+
+Q: Why does the scraper write directly to Postgres instead of calling the Express API?
+A: The API is designed for external consumers — it enforces JWT auth, rate limiting, and user-scoped validation. The scraper is a trusted internal service running on the same infrastructure. Making it fake a login to call its own API adds complexity with no security benefit. Direct DB access is the right pattern for internal data pipeline services.
+
+Q: What is an idempotent write and why does the scraper use it?
+A: An idempotent operation produces the same result no matter how many times it runs. The cinema seed uses `INSERT ... ON CONFLICT (slug) DO UPDATE` — running it twice leaves one cinema row, not two. This matters for scrapers because they run on a schedule and must handle restarts, retries, and re-runs without creating duplicates or crashing.
+
+Q: The scraper stores datetimes in UTC even though Alice Cinema's times are in NZ time. Why?
+A: The database stores UTC as a neutral reference point. If you stored NZ local time, any query comparing timestamps across timezones would be wrong. UTC lets the frontend convert to the user's local timezone at display time. The rule: always store UTC, always convert at the display layer.
+
+Q: Why does `run.py` cache TMDB lookups in a `seen` dict instead of calling TMDB once per session?
+A: Multiple sessions can share the same movie. Without caching, a movie with 5 sessions would trigger 5 identical TMDB API calls. The `seen` dict maps movie slug to UUID so TMDB is called once per unique movie per scraper run. This is the memoisation pattern — cache the result of an expensive operation keyed by its input.
