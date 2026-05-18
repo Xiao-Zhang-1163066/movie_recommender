@@ -390,3 +390,24 @@ A: The database stores UTC as a neutral reference point. If you stored NZ local 
 
 Q: Why does `run.py` cache TMDB lookups in a `seen` dict instead of calling TMDB once per session?
 A: Multiple sessions can share the same movie. Without caching, a movie with 5 sessions would trigger 5 identical TMDB API calls. The `seen` dict maps movie slug to UUID so TMDB is called once per unique movie per scraper run. This is the memoisation pattern — cache the result of an expensive operation keyed by its input.
+
+---
+
+## Phase 9 — Cinema Routes & Controller
+
+**What this module does**
+Two public endpoints that expose cinema data to the frontend: `GET /cinemas` returns all cinemas (used for map/list views), and `GET /cinemas/:slug` returns a single cinema with its sessions included (used for the cinema detail page). No auth required — cinema data is public.
+
+**Key design decision**
+These routes have no `protect` middleware because cinema listings are public information. Any visitor should be able to browse what's showing without logging in. Contrast this with watchlist routes, which are always protected because the data is personal.
+
+**One thing I found surprising**
+The `include: { sessions: true }` on `getCinemaBySlug` pulls in all related sessions in one query — Prisma handles the JOIN automatically. Without it, the detail page would need a second request to `/sessions?cinemaId=...` to get session times.
+
+**Interview Q&A**
+
+Q: When should you use `findUnique` vs `findFirst`?
+A: `findUnique` can only be called on fields marked `@id` or `@unique` in the schema — Prisma enforces this at the type level. `findFirst` works on any field. Use `findUnique` when searching by a unique field like `slug` or `id`: it makes a semantic contract that the field is unique, lets Prisma optimise the query, and gives a compile-time error if you accidentally point it at a non-unique field.
+
+Q: Why are `GET /cinemas` and `GET /cinemas/:slug` public routes?
+A: Cinema data is shared public content — any visitor should be able to browse what's showing without an account. Protected routes are for personal data (watchlist) or write operations that need to be attributed to a user. Auth adds friction; only apply it where it's genuinely needed.
