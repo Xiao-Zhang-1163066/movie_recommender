@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import type { Cinema } from "@/data/cinemas";
+import type { Cinema } from "@/types/cinema";
 import {
   Card,
   CardContent,
@@ -11,16 +11,23 @@ interface CinemaCardProps {
   cinema: Cinema;
 }
 function CinemaCard({ cinema }: CinemaCardProps) {
-  const { id, name, suburb, screens } = cinema;
+  const { slug, name, suburb, websiteUrl } = cinema;
   return (
-    <Link to={`/cinemas/${id}`}>
+    <Link to={`/cinemas/${slug}`}>
       <Card>
         <CardHeader>
           <CardTitle>{name}</CardTitle>
           <CardDescription>{suburb}</CardDescription>
         </CardHeader>
         <CardContent>
-          <p>Screens: {screens}</p>
+          <a
+            href={websiteUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+          >
+            Visit website
+          </a>
         </CardContent>
       </Card>
     </Link>

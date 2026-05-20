@@ -18,7 +18,13 @@ const getCinemaBySlug = async (req, res) => {
   const cinemaSlug = req.params.slug;
   const cinema = await prisma.cinema.findUnique({
     where: { slug: cinemaSlug },
-    include: { sessions: true },
+    include: {
+      sessions: {
+        include: {
+          movie: true,
+        },
+      },
+    },
   });
   if (!cinema) {
     return res.status(404).json({

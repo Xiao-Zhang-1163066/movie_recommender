@@ -24,7 +24,7 @@ function App() {
             <Route path="/movies/:id" element={<MovieDetailPage />} />
             <Route path="/movies/:id/cinemas" element={<ShowtimesPage />} />
             <Route path="/cinemas" element={<CinemasPage />} />
-            <Route path="/cinemas/:id" element={<CinemaDetailPage />} />
+            <Route path="/cinemas/:slug" element={<CinemaDetailPage />} />
             <Route element={<ProtectedRoute />}>
               <Route path="/chat" element={<ChatPage />} />
               <Route path="/watchlist" element={<WatchlistPage />} />

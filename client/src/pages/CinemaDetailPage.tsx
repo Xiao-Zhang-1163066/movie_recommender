@@ -1,67 +1,116 @@
-import { useState, useEffect } from "react";
+import { useState, useMemo } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
-import { cinemas } from "@/data/cinemas";
-import { sessions } from "@/data/sessions";
-import { getMovieById, IMG_URL } from "@/api/tmdb";
 import DatePicker from "@/components/DatePicker";
-import type { Movie } from "@/api/tmdb";
+import useCinema from "@/hooks/useCinema";
+import type { Session } from "@/types/cinema";
 
-const today = new Date().toISOString().split("T")[0];
+const TZ = "Pacific/Auckland";
+const getNZDate = (iso: string) =>
+  new Date(iso).toLocaleDateString("en-CA", { timeZone: TZ });
+const getNZTime = (iso: string) =>
+  new Date(iso).toLocaleTimeString("en-NZ", {
+    timeZone: TZ,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
 
 function CinemaDetailPage() {
-  const { id: cinemaId } = useParams(); // our mock ID, e.g "c1"
+  const { slug } = useParams();
+  const { isFetching: isLoading, cinema, error } = useCinema(slug!);
   const [searchParams] = useSearchParams();
   const tmdbMovieId = searchParams.get("movieId"); // TMDb ID from query param
 
-  const cinema = cinemas.find((c) => c.id === cinemaId);
-
-  const [selectedDate, setSelectedDate] = useState(today);
+  const [selectedDate, setSelectedDate] = useState(
+    () => new Date().toLocaleDateString("en-CA", { timeZone: TZ }),
+  );
   const [selectedTmdbId, setSelectedTmdbId] = useState(tmdbMovieId); // TMDb ID
-  const [movies, setMovies] = useState<Record<string, Movie>>({}); // keyed by TMDb ID
 
-  const cinemaSessions = sessions[cinemaId!] ?? {};
-  const sessionTimes = selectedTmdbId
-    ? (cinemaSessions[selectedTmdbId]?.[selectedDate] ?? [])
-    : [];
-  const allTmdbIds = Object.keys(cinemaSessions);
+  // step 4: use useMemo to build a grouped sessions object from cinema.sessions
+  // shape: { [movieId]: { movie, [date]: [time, time, ...] } }
+  // hint: use .reduce() over cinema.sessions
+  // hint: startsAt is an ISO string — split on "T" to get date, slice(11,16) to get time
+  // return {} if cinema is null
+  const cinemaSessions = useMemo(() => {
+    const cinemaSessions = cinema
+      ? cinema.sessions.reduce(
+          (acc, session) => {
+            const tmdbId = session.movie.tmdbId.toString();
+            const date = getNZDate(session.startsAt);
+            const time = getNZTime(session.startsAt);
+            if (!acc[tmdbId]) {
+              acc[tmdbId] = { movie: session.movie, dates: { [date]: [time] } };
+            } else if (!acc[tmdbId].dates[date]) {
+              acc[tmdbId].dates[date] = [time];
+            } else {
+              acc[tmdbId].dates[date].push(time);
+            }
+            return acc;
+          },
+          {} as Record<
+            string,
+            { movie: Session["movie"]; dates: Record<string, string[]> }
+          >,
+        )
+      : {};
+    return cinemaSessions;
+  }, [cinema]);
+
+  const sortedEntries = useMemo(() => {
+    const onDate = (d: Record<string, string[]>) => (d[selectedDate] ?? []).length;
+    const total = (d: Record<string, string[]>) =>
+      Object.values(d).reduce((sum, times) => sum + times.length, 0);
+    return Object.entries(cinemaSessions).sort(([, a], [, b]) => {
+      const byDate = onDate(b.dates) - onDate(a.dates);
+      return byDate !== 0 ? byDate : total(b.dates) - total(a.dates);
+    });
+  }, [cinemaSessions, selectedDate]);
+
+  // fall back to first movie (most sessions) if nothing is selected yet
+  const effectiveTmdbId = selectedTmdbId ?? sortedEntries[0]?.[0] ?? null;
+
+  // step 5: derive sessionTimes — sessions for selectedMovieId on selectedDate;
+  // (or [] if nothing selected)
+  const sessionTimes = useMemo(() => {
+    if (!effectiveTmdbId || !cinema) return [];
+    return cinema.sessions
+      .filter((s) => s.movie.tmdbId.toString() === effectiveTmdbId)
+      .filter((s) => getNZDate(s.startsAt) === selectedDate)
+      .map((s) => ({ id: s.id, time: getNZTime(s.startsAt) }));
+  }, [effectiveTmdbId, selectedDate, cinema]);
+
+  // step 6: handle loading and error states
+  if (isLoading) {
+    return <div className="p-6">Loading...</div>;
+  }
+  if (error) {
+    return <div className="p-6 text-red-500">Error: {error}</div>;
+  }
+  if (!cinema) {
+    return <div className="p-6 text-red-500">Cinema not found</div>;
+  }
 
   const nextDate = Object.keys(
-    selectedTmdbId ? (cinemaSessions[selectedTmdbId] ?? {}) : {},
+    effectiveTmdbId ? (cinemaSessions[effectiveTmdbId]?.dates ?? {}) : {},
   )
     .filter((date) => date > selectedDate)
     .sort()[0]; // earliest future date with sessions
 
-  // step 10: when cinemaId changes, fetch details for all movies that have sessions at this cinema (regardless of date)
-  useEffect(() => {
-    const fetchMovies = async () => {
-      const tmdbIds = Object.keys(cinemaSessions);
-      const results = await Promise.all(
-        tmdbIds.map((tmdbId) => getMovieById(tmdbId)),
-      );
-
-      const movieMap: Record<string, Movie> = {};
-      results.forEach((movie, i) => {
-        movieMap[tmdbIds[i]] = movie; // keyed by TMDb ID
-      });
-      setMovies(movieMap);
-    };
-    fetchMovies();
-  }, [cinemaId]); // cinemaSessions is derived directly from sessions (static import) and cinemaId (already in the array), so it can never change independently of cinemaId
   return (
     <div>
       <h1 className="text-2xl font-bold mb-4">{cinema?.name}</h1>
 
       {/* Movie poster row — all movies at this cinema */}
       <div className="flex gap-4 overflow-x-auto pb-2">
-        {allTmdbIds.map((tmdbId) => (
+        {sortedEntries.map(([tmdbId, data]) => (
           <div
             key={tmdbId}
             onClick={() => {
               setSelectedTmdbId(tmdbId);
-              setSelectedDate(today);
+              setSelectedDate(new Date().toLocaleDateString("en-CA", { timeZone: TZ }));
             }}
             className={`cursor-pointer rounded overflow-hidden border-2 ${
-              tmdbId === selectedTmdbId
+              tmdbId === effectiveTmdbId
                 ? "border-red-500"
                 : "border-transparent"
             }`}
@@ -69,12 +118,8 @@ function CinemaDetailPage() {
             {/* poster image — use IMG_URL from tmdb.ts + movies[tmdbId]?.poster_path */}
             {/* fallback if poster not loaded yet */}
             <img
-              src={
-                movies[tmdbId]
-                  ? `${IMG_URL}${movies[tmdbId].poster_path}`
-                  : "https://via.placeholder.com/200x300?text=Loading..."
-              }
-              alt={movies[tmdbId]?.title ?? "Loading..."}
+              src={data.movie.posterUrl ?? "https://via.placeholder.com/200x300?text=No+Poster"}
+              alt={data.movie.title}
               className="w-32 h-auto object-cover"
             />
           </div>
@@ -86,17 +131,17 @@ function CinemaDetailPage() {
 
       {/* Sessions */}
       <div className="mt-4">
-        {!selectedTmdbId ? (
+        {!effectiveTmdbId ? (
           <p className="text-gray-400">Select a movie to see sessions</p>
         ) : sessionTimes.length > 0 ? (
           <div className="flex gap-2 flex-wrap">
             {/* render each time as a button */}
-            {sessionTimes.map((time) => (
+            {sessionTimes.map((s) => (
               <button
-                key={time}
+                key={s.id}
                 className="px-4 py-2 bg-green-500 text-white rounded"
               >
-                {time}
+                {s.time}
               </button>
             ))}
           </div>

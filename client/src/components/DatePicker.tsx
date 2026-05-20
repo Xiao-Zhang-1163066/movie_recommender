@@ -5,15 +5,9 @@ interface DatePickerProps {
   onChange: (date: string) => void;
 }
 
-// generate dates array:
-const dates = Array.from({ length: 7 }, (_, i) => {
-  const d = new Date();
-  d.setDate(d.getDate() + i);
-  return d;
-});
-
 // helper to get YYYY-MM-DD string from a Date:
-const dateFormatter = (date: Date): string => date.toISOString().split("T")[0];
+const dateFormatter = (date: Date): string =>
+  date.toLocaleDateString("en-CA", { timeZone: "Pacific/Auckland" });
 
 // helper to get button label:
 const dateLabel = (date: Date, index: number) => {
@@ -27,7 +21,13 @@ const dateLabel = (date: Date, index: number) => {
     })
     .toUpperCase();
 };
+
 export default function DatePicker({ selected, onChange }: DatePickerProps) {
+  const dates = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() + i);
+    return d;
+  });
   return (
     <div className="flex gap-2 overflow-x-auto py-2">
       {dates.map((date, i) => {
