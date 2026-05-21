@@ -7,6 +7,8 @@ export interface Movie {
   title: string;
   poster_path: string | null;
   vote_average: number;
+  overview: string;
+  release_date: string; // e.g. "2024-11-15"
 }
 
 export interface NowPlayingResponse {
@@ -25,7 +27,6 @@ export async function getNowPlaying() {
 }
 
 export interface MovieDetail extends Movie {
-  overview: string;
   runtime: number;
   genres: { id: number; name: string }[];
 }

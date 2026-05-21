@@ -19,23 +19,38 @@ const getWatchlist = async (req, res) => {
 
 // POST /watchlist - protected
 const addToWatchlist = async (req, res) => {
-  const { movieId, status, rating, notes } = req.body;
-  const movie = await prisma.movie.findFirst({
+  const {
+    tmdbId,
+    title,
+    posterUrl,
+    overview,
+    releaseYear,
+    status,
+    rating,
+    notes,
+  } = req.body;
+  let movie = await prisma.movie.findUnique({
     where: {
-      id: movieId,
+      tmdbId,
     },
   });
   if (!movie) {
-    return res.status(404).json({
-      status: "fail",
-      message: "Movie not found",
+    movie = await prisma.movie.create({
+      data: {
+        tmdbId,
+        title,
+        posterUrl,
+        overview,
+        releaseYear,
+        createdBy: req.user.id,
+      },
     });
   }
   try {
-    const watchlist = await prisma.watchlistItem.create({
+    const watchlistItem = await prisma.watchlistItem.create({
       data: {
         userId: req.user.id,
-        movieId,
+        movieId: movie.id,
         status,
         rating,
         notes,
@@ -44,7 +59,7 @@ const addToWatchlist = async (req, res) => {
     res.status(201).json({
       status: "success",
       data: {
-        watchlist,
+        watchlistItem,
       },
       message: "Movie added to watchlist successfully",
     });

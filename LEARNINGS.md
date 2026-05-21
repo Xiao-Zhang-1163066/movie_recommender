@@ -411,3 +411,54 @@ A: `findUnique` can only be called on fields marked `@id` or `@unique` in the sc
 
 Q: Why are `GET /cinemas` and `GET /cinemas/:slug` public routes?
 A: Cinema data is shared public content — any visitor should be able to browse what's showing without an account. Protected routes are for personal data (watchlist) or write operations that need to be attributed to a user. Auth adds friction; only apply it where it's genuinely needed.
+
+---
+
+## Phase 10 — Frontend: Custom Hooks + Cinema Pages
+
+**What this module does**
+Replaces mock data in `CinemasPage` and `CinemaDetailPage` with real API calls. Two custom hooks — `useCinemas.ts` (fetches all cinemas) and `useCinema.ts` (fetches one by slug) — encapsulate the fetch logic and expose `isLoading`, `data`, and `error`. `CinemaDetailPage` uses `useMemo` to group the flat sessions array into a structure keyed by movie, then by date, so the UI can efficiently look up session times for any movie/date combination.
+
+**Key design decision**
+Session data comes from the API as a flat array. The UI needs it grouped: "all movies at this cinema" and "session times for selected movie on selected date." Rather than re-filtering the array on every render, `useMemo` builds the grouped structure once and caches it until `cinema` changes. This is the **grouping pattern** — transform flat API data into a shape the UI can consume directly, and memoize it so the transformation only runs when the source data changes.
+
+**One thing I found surprising**
+`useParams()` only works if the route param name matches exactly — the route was defined as `/:id` but the page destructured `slug`, so `slug` was always `undefined`. The fix was renaming the route param to `/:slug`. The mismatch produced no TypeScript error — it just silently returned `undefined` at runtime.
+
+**Interview Q&A**
+
+Q: What is a custom hook and why use one instead of fetching data directly in the component?
+A: A custom hook is a function that starts with `use` and can call other hooks. It extracts reusable stateful logic out of a component. Fetching in the component works, but if two pages need the same data you'd duplicate the fetch logic. A custom hook lets both pages call `useCinemas()` and share the same loading/error/data pattern without repeating code.
+
+Q: What does `useMemo` do and when should you use it?
+A: `useMemo` runs a function and caches the result, only recalculating when its dependencies change. Use it when a computation is expensive or produces a new object/array reference on every render that would otherwise trigger unnecessary re-renders downstream. Don't use it for simple calculations — the overhead of memoization outweighs the benefit.
+
+Q: Why does `isLoading` start as `true` instead of `false` in the custom hooks?
+A: The fetch starts immediately on mount. If `isLoading` started `false`, the component would render with empty data on the first frame before the fetch completes — potentially showing a blank list or triggering a 404 redirect. Starting at `true` forces the component to show a loading state until real data arrives.
+
+---
+
+## Phase 11 — Add to Watchlist Button
+
+**What this module does**
+Adds an "Add to Watchlist" button to every movie card on `MoviesPage`. On mount, the page fetches the user's existing watchlist and builds a `Set<number>` of TMDB IDs. Each button checks `watchlistIds.has(movie.id)` to render as "In Watchlist" (disabled) or "Add to Watchlist" (active). Clicking calls `POST /api/watchlist` with TMDB movie data; the backend does a find-or-create on the `Movie` table before creating the `WatchlistItem`. The button is only shown to authenticated users.
+
+**Key design decision**
+`MoviesPage` shows TMDB movies (integer IDs) but `WatchlistItem` requires a UUID foreign key to our own `Movie` table. Rather than adding a separate "find-or-create movie" endpoint, the `POST /api/watchlist` controller handles it internally: look up the movie by `tmdbId`, create it if missing, then create the watchlist entry. One API call from the frontend, all complexity on the backend. This is the **find-or-create pattern** — check if exists, create if not, proceed either way.
+
+**One thing I found surprising**
+Updating a `Set` in React state requires creating a new Set — you can't mutate the existing one. `setWatchlistIds(prev => new Set(prev).add(id))` works because it returns a new reference, triggering a re-render. `prev.add(id)` mutates in place and React never re-renders because the reference didn't change.
+
+**Interview Q&A**
+
+Q: Why use a `Set` instead of an array to track which movies are in the watchlist?
+A: `Set.has()` is O(1) — it uses a hash table internally and finds an item in constant time regardless of Set size. Array `.includes()` is O(n) — it scans left to right until it finds a match. With 20 movie cards and 200 watchlist items, `.includes()` does up to 4,000 comparisons per render. `.has()` does exactly 20.
+
+Q: The watchlist `useEffect` depends on `[isAuthenticated]`. What breaks if you use `[]` instead?
+A: `[]` means "run once on mount." If the user isn't logged in when the page first loads and logs in later, the watchlist fetch never re-runs — the Set stays empty and every button shows "Add to Watchlist" even for movies already in their watchlist. `[isAuthenticated]` re-runs whenever auth state changes, keeping the Set in sync with reality.
+
+Q: Why does the button's `onClick` call `e.stopPropagation()`?
+A: The button sits inside a `div` that has its own `onClick` navigating to the movie detail page. Without `stopPropagation()`, a button click triggers both handlers — click events bubble up the DOM tree from child to parent. `stopPropagation()` stops the event at the button so the parent `div` never sees it and navigation doesn't fire.
+
+Q: `MoviesPage` shows TMDB movies but the watchlist stores a UUID foreign key. How does the backend bridge the two ID spaces?
+A: The `POST /api/watchlist` controller receives the TMDB integer ID alongside movie metadata. It first calls `prisma.movie.findUnique({ where: { tmdbId } })`. If the movie exists in our DB, it uses that row's UUID. If not, it creates the movie row with `prisma.movie.create(...)` using the TMDB data sent from the frontend. Either way, it ends up with a UUID to attach to the new `WatchlistItem`. This is the find-or-create pattern.
