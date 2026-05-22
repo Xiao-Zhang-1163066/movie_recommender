@@ -462,3 +462,54 @@ A: The button sits inside a `div` that has its own `onClick` navigating to the m
 
 Q: `MoviesPage` shows TMDB movies but the watchlist stores a UUID foreign key. How does the backend bridge the two ID spaces?
 A: The `POST /api/watchlist` controller receives the TMDB integer ID alongside movie metadata. It first calls `prisma.movie.findUnique({ where: { tmdbId } })`. If the movie exists in our DB, it uses that row's UUID. If not, it creates the movie row with `prisma.movie.create(...)` using the TMDB data sent from the frontend. Either way, it ends up with a UUID to attach to the new `WatchlistItem`. This is the find-or-create pattern.
+
+---
+
+## Phase 12 — Watchlist Enhancement (Rating UI + Split Views + Status Change)
+
+**What this module does**
+Enhances `WatchlistPage` with three features: tab-based filtering (Want to Watch / Watched), a rating `<select>` on Watched items, and a status `<select>` on Want to Watch items. Rating and status changes call `PUT /api/watchlist/:id` and update `items` state using the immutable `.map()` pattern. No new backend routes — the existing update endpoint handles both fields.
+
+**Key design decision**
+`wantToWatchItems`, `watchedItems`, and `displayedItems` are all derived directly in the component body — not stored in `useState`. This means a single `setItems(...)` call automatically updates both tabs. When a user changes a PLANNED item to COMPLETED, it disappears from the Want to Watch tab and appears in the Watched tab with no extra logic. This is the core payoff of keeping derived state out of `useState`: one source of truth, zero sync bugs.
+
+**One thing I found surprising**
+The backend update route was registered as `PUT` but the frontend was calling `PATCH`. The request failed silently — `handleRating` caught the error and logged it, but the UI's controlled input snapped back to the saved value because the state update was gated behind `response.ok`. No visible error, but the DB was never updated. Always verify the HTTP method matches the route registration when a write operation appears to do nothing.
+
+**Interview Q&A**
+
+Q: What is a controlled input and why does it matter for error handling?
+A: A controlled input has its displayed value driven by React state via the `value` prop. If a `PUT` request fails, the state update never runs, so the input automatically reverts to the last saved value — no manual reset needed. An uncontrolled input (no `value` prop) lets the browser own the displayed value, so a failed save leaves the UI showing data that was never persisted.
+
+Q: `wantToWatchItems` and `watchedItems` are computed in the component body, not in `useEffect`. Why?
+A: They're derived state — computed synchronously from `items` with no async work and no external systems involved. `useEffect` is for side effects: fetches, subscriptions, DOM mutations. Putting pure computations inside `useEffect` would add unnecessary complexity and timing issues. The rule: if you can compute it from existing state or props, do it in the render body.
+
+Q: What's the difference between a pessimistic and an optimistic update? Which did you use here?
+A: A pessimistic update hits the API first and updates state only on success — the UI waits for confirmation. An optimistic update changes state immediately and rolls back on failure — the UI feels instant. The rating and status selects use pessimistic updates: `setItems` only runs if `response.ok` is true. For a rating selector the latency is imperceptible, so pessimistic is appropriate. Optimistic updates pay off for high-frequency interactions like text editing where latency is noticeable.
+
+Q: Why does `e.target.value as WatchlistItem["status"]` need a type cast?
+A: A `<select>` element always returns a plain `string` from `e.target.value` — TypeScript has no way to know which option was selected. The cast tells TypeScript to treat it as the union type `"PLANNED" | "WATCHING" | "COMPLETED" | "DROPPED"`. It's safe here because the `<select>` options are hardcoded to exactly those four values, so the cast can never be wrong at runtime.
+
+---
+
+## Phase 13 — Confirm-and-Rate Modal
+
+**What this module does**
+Adds a shadcn `Dialog` that intercepts status changes to COMPLETED or DROPPED. Instead of immediately calling the API, the status select opens a modal asking for an optional rating before confirming. PLANNED and WATCHING changes bypass the modal entirely. On confirm, a single `PUT` request sends both `status` and `rating` together. On cancel, the controlled select snaps back automatically because state was never updated.
+
+**Key design decision**
+`pendingChange` is typed as `{ itemId, newStatus, movieTitle } | null` — `null` means closed, an object means open. This is state colocation: the modal's open/closed state and its data are a single atomic unit. A separate `isModalOpen: boolean` would require two state updates to open the modal safely, creating a window where the modal could render with stale or missing context.
+
+**One thing I found surprising**
+`handleStatusChange` updated `status` in local state but not `rating`. The backend saved both fields correctly, but the Watched tab's rating select showed blank because it reads from state — not from the DB. The fix was `rating: rating ?? item.rating` in the `.map()` spread: use the new rating if one was passed, otherwise keep the existing value.
+
+**Interview Q&A**
+
+Q: Why use `null` as the closed state for a modal instead of a separate `isModalOpen` boolean?
+A: With a boolean, you need two state updates to open the modal — set `isOpen: true` and set the item context. If they fire at different times or one is forgotten, the modal opens with no data. Using `null` as closed and an object as open means modal visibility and context are a single atomic update: one `setPendingChange(...)` call opens the modal with everything it needs. This pattern is called state colocation.
+
+Q: Why does the modal only appear for COMPLETED and DROPPED, not PLANNED or WATCHING?
+A: PLANNED and WATCHING are reversible progress updates with no side effects — no confirmation or extra data needed. COMPLETED and DROPPED are terminal states where collecting a rating is meaningful. Adding a modal to every status change would create unnecessary friction; reserving it for final states makes the UX intentional. The rule: only add confirmation steps when the action is consequential or irreversible.
+
+Q: The cancel button closes the modal without calling the API. The status select then shows the original status, not what the user picked. How does that work without any reset code?
+A: The select is a controlled input — `value={item.status}` ties its display to React state. `handleCancel` only clears `pendingChange`; it never calls `setItems`, so `item.status` in state is unchanged. On the next render, the select displays the original status automatically. Controlled inputs self-correct to match state with no manual reset needed.
