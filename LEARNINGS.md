@@ -513,3 +513,45 @@ A: PLANNED and WATCHING are reversible progress updates with no side effects —
 
 Q: The cancel button closes the modal without calling the API. The status select then shows the original status, not what the user picked. How does that work without any reset code?
 A: The select is a controlled input — `value={item.status}` ties its display to React state. `handleCancel` only clears `pendingChange`; it never calls `setItems`, so `item.status` in state is unchanged. On the next render, the select displays the original status automatically. Controlled inputs self-correct to match state with no manual reset needed.
+
+---
+
+## Phase 14 — Book Now Deep-Link (CinemaDetailPage)
+
+**What this module does**
+Adds a `bookingUrl` field to the `sessionTimes` derived array in `CinemaDetailPage` and replaces the inert `<button>` with a conditional `<a>` / `<span>`. Sessions with a booking URL render as a green link that opens the cinema's booking page in a new tab. Sessions without one render as a grey non-clickable span — the session is still visible, the user just can't book online.
+
+**Key design decision**
+Showing a disabled span instead of hiding sessions with no `bookingUrl` — a session without a booking link is still useful information. Hiding it would make the page look like fewer sessions exist. The visual difference (green vs grey) communicates "bookable online" vs "check at the box office" without hiding data.
+
+**One thing I found surprising**
+Both the `<a>` and `<span>` rendered by `.map()` need `key={s.id}`. The ternary returns two different element types depending on `bookingUrl`, but React still requires a stable key on whichever element is returned. Missing it produces a console warning and can cause subtle re-render bugs if the list order changes.
+
+**Interview Q&A**
+
+Q: What does `rel="noopener noreferrer"` do on an `<a target="_blank">` link?
+A: Without it, the opened tab gets a reference to the opener window via `window.opener`, which a malicious page could use to redirect the original tab. `noopener` removes that reference. `noreferrer` also prevents the `Referer` header from being sent. Both are a security best practice on any link that opens a new tab to an external site.
+
+---
+
+## Phase 15 — In Theaters Section + voteAverage
+
+**What this module does**
+Adds a `voteAverage Float?` field to the `Movie` schema, updates the Python scraper to store it at scrape time, and adds an `inTheaters` query param to `GET /movies` that filters to movies with at least one upcoming session. `MoviesPage` gains an "In Theaters Now" section above the TMDB "Discover" grid, showing only locally showing movies with real ratings from our DB.
+
+**Key design decision**
+`voteAverage` is stored in the DB at scrape time rather than fetched from TMDB at render time. The alternative — calling TMDB once per movie on every page load — would fire N parallel requests every time any user opens the page. Storing it during scraping means zero extra API calls at render time. The trade-off is that ratings can go stale between scraper runs, which is acceptable for a portfolio app.
+
+**One thing I found surprising**
+`npx prisma migrate dev` runs `prisma generate` automatically — but the running Express server doesn't pick up the regenerated client. The server loads the generated client once on startup and caches it in memory. Adding a new schema field returns `undefined` (not `null`) for that field until the server is restarted. The rule: any schema change requires both a migration and a server restart.
+
+**Interview Q&A**
+
+Q: What does `sessions: { some: { startsAt: { gte: new Date() } } }` do in Prisma, and what would `every` mean instead?
+A: `some` returns movies where at least one session matches the condition — at least one session starts in the future. `every` would return movies where all sessions start in the future, which would exclude a movie the moment any one of its past sessions elapsed, even if it has more sessions tomorrow. `some` is correct here.
+
+Q: Why store `voteAverage` in the DB at scrape time rather than fetching it from TMDB at render time?
+A: Fetching at render time means N TMDB API calls on every page load — one per movie. With 20 movies and 100 concurrent users, that's 2,000 external API calls per second. Storing at scrape time costs one TMDB call per movie per scraper run regardless of traffic. The trade-off is ratings can go stale between scraper runs, which is acceptable. In production you'd add a `voteAverageUpdatedAt` timestamp and re-fetch when stale.
+
+Q: The server returned `voteAverage: undefined` after the migration. Why `undefined` and not `null`?
+A: `undefined` means the field doesn't exist on the object at all — the Prisma client didn't know about it. `null` would mean the field exists but has no value. The generated client is loaded once at server startup and cached in memory. `prisma migrate dev` regenerates the client on disk, but the running process still uses the old in-memory version. A server restart is required to load the new client.

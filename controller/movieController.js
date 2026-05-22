@@ -11,7 +11,12 @@ import { prisma } from "../config/db.js";
 
 // GET /movies -public
 const getAllMovies = async (req, res) => {
-  const movies = await prisma.movie.findMany();
+  const { inTheaters } = req.query;
+  const where =
+    inTheaters === "true"
+      ? { sessions: { some: { startsAt: { gte: new Date() } } } }
+      : undefined;
+  const movies = await prisma.movie.findMany({ where });
   res.status(200).json({
     status: "success",
     data: {

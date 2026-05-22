@@ -100,35 +100,37 @@ def fetch_tmdb_movie(title):
         'releaseYear': release_year,
         'genres': [g['name'] for g in movie.get('genres', [])],
         'runtime': movie.get('runtime'),
+        'voteAverage': movie.get('vote_average'),
         'posterUrl': f"{TMDB_IMAGE_BASE}{movie['poster_path']}" if movie.get('poster_path') else None,
     }
 
 def find_or_create_movie(conn, tmdb_data, system_user_id):
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cursor.execute("""
-        INSERT INTO "Movie" (id, title, overview, "releaseYear", genres, runtime, "posterUrl", "createdBy", "tmdbId")
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-        -- if this TMDB movie already exists in our DB, update its metadata instead of inserting a duplicate
-        ON CONFLICT ("tmdbId") DO UPDATE SET
-            title       = EXCLUDED.title,
-            overview    = EXCLUDED.overview,
-            "releaseYear" = EXCLUDED."releaseYear",
-            genres      = EXCLUDED.genres,
-            runtime     = EXCLUDED.runtime,
-            "posterUrl" = EXCLUDED."posterUrl"
-        -- RETURNING gives us back the row's id whether we inserted or updated
-        RETURNING id
-    """, (
-        str(uuid.uuid4()),
-        tmdb_data['title'],
-        tmdb_data.get('overview'),
-        tmdb_data['releaseYear'],
-        tmdb_data['genres'],
-        tmdb_data.get('runtime'),
-        tmdb_data.get('posterUrl'),
-        system_user_id,
-        tmdb_data['tmdbId'],
-    ))
+      INSERT INTO "Movie" (id, title, overview, "releaseYear", genres, runtime,
+   "voteAverage", "posterUrl", "createdBy", "tmdbId")
+      VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+      ON CONFLICT ("tmdbId") DO UPDATE SET
+          title           = EXCLUDED.title,
+          overview        = EXCLUDED.overview,
+          "releaseYear"   = EXCLUDED."releaseYear",
+          genres          = EXCLUDED.genres,
+          runtime         = EXCLUDED.runtime,
+          "voteAverage"   = EXCLUDED."voteAverage",
+          "posterUrl"     = EXCLUDED."posterUrl"
+      RETURNING id
+  """, (
+      str(uuid.uuid4()),
+      tmdb_data['title'],
+      tmdb_data.get('overview'),
+      tmdb_data['releaseYear'],
+      tmdb_data['genres'],
+      tmdb_data.get('runtime'),
+      tmdb_data.get('voteAverage'),
+      tmdb_data.get('posterUrl'),
+      system_user_id,
+      tmdb_data['tmdbId'],
+  ))
     row = cursor.fetchone()
     conn.commit()
     return row['id']
