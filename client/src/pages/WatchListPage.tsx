@@ -17,6 +17,12 @@ type WatchlistItem = {
 
 type Tab = "watchlist" | "watched";
 
+type PendingChange = {
+  itemId: string;
+  newStatus: WatchlistItem["status"];
+  movieTitle: string;
+} | null;
+
 function WatchlistPage() {
   const [items, setItems] = useState<WatchlistItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -233,10 +239,6 @@ function WatchlistPage() {
                   </select>
                 </div>
               )}
-              {/*  in the "Want to Watch" tab cards only (activeTab === "watchlist")
-               a <select> with options: PLANNED, WATCHING, COMPLETED, DROPPED
-               value={item.status}
-               onChange calls handleStatusChange(item.id, e.target.value) */}
               {activeTab === "watchlist" && (
                 <div className="mt-2">
                   <label htmlFor={`status-${item.id}`} className="mr-2">
@@ -270,7 +272,6 @@ function WatchlistPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {/* TODO: show "Mark {pendingChange?.movieTitle} as watched?" */}
               Mark{" "}
               {pendingChange
                 ? items.find((item) => item.id === pendingChange.itemId)?.movie
@@ -280,9 +281,6 @@ function WatchlistPage() {
             </DialogTitle>
           </DialogHeader>
 
-          {/* TODO: optional rating select — same 1-10 options as before
-            value={pendingRating}
-            onChange updates pendingRating state */}
           <div className="mt-4">
             <label htmlFor="pending-rating" className="mr-2">
               Your Rating:
@@ -307,8 +305,6 @@ function WatchlistPage() {
           </div>
 
           <DialogFooter>
-            {/* TODO: Cancel button — calls handleCancel */}
-            {/* TODO: Confirm button — calls handleConfirm */}
             <button
               onClick={handleCancel}
               className="mr-2 px-4 py-2 bg-gray-300 rounded hover:bg-gray-400"

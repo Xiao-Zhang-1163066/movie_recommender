@@ -21,8 +21,8 @@ function CinemaDetailPage() {
   const [searchParams] = useSearchParams();
   const tmdbMovieId = searchParams.get("movieId"); // TMDb ID from query param
 
-  const [selectedDate, setSelectedDate] = useState(
-    () => new Date().toLocaleDateString("en-CA", { timeZone: TZ }),
+  const [selectedDate, setSelectedDate] = useState(() =>
+    new Date().toLocaleDateString("en-CA", { timeZone: TZ }),
   );
   const [selectedTmdbId, setSelectedTmdbId] = useState(tmdbMovieId); // TMDb ID
 
@@ -57,7 +57,8 @@ function CinemaDetailPage() {
   }, [cinema]);
 
   const sortedEntries = useMemo(() => {
-    const onDate = (d: Record<string, string[]>) => (d[selectedDate] ?? []).length;
+    const onDate = (d: Record<string, string[]>) =>
+      (d[selectedDate] ?? []).length;
     const total = (d: Record<string, string[]>) =>
       Object.values(d).reduce((sum, times) => sum + times.length, 0);
     return Object.entries(cinemaSessions).sort(([, a], [, b]) => {
@@ -76,7 +77,11 @@ function CinemaDetailPage() {
     return cinema.sessions
       .filter((s) => s.movie.tmdbId.toString() === effectiveTmdbId)
       .filter((s) => getNZDate(s.startsAt) === selectedDate)
-      .map((s) => ({ id: s.id, time: getNZTime(s.startsAt) }));
+      .map((s) => ({
+        id: s.id,
+        time: getNZTime(s.startsAt),
+        bookingUrl: s.bookingUrl,
+      }));
   }, [effectiveTmdbId, selectedDate, cinema]);
 
   // step 6: handle loading and error states
@@ -107,7 +112,9 @@ function CinemaDetailPage() {
             key={tmdbId}
             onClick={() => {
               setSelectedTmdbId(tmdbId);
-              setSelectedDate(new Date().toLocaleDateString("en-CA", { timeZone: TZ }));
+              setSelectedDate(
+                new Date().toLocaleDateString("en-CA", { timeZone: TZ }),
+              );
             }}
             className={`cursor-pointer rounded overflow-hidden border-2 ${
               tmdbId === effectiveTmdbId
@@ -118,7 +125,10 @@ function CinemaDetailPage() {
             {/* poster image — use IMG_URL from tmdb.ts + movies[tmdbId]?.poster_path */}
             {/* fallback if poster not loaded yet */}
             <img
-              src={data.movie.posterUrl ?? "https://via.placeholder.com/200x300?text=No+Poster"}
+              src={
+                data.movie.posterUrl ??
+                "https://via.placeholder.com/200x300?text=No+Poster"
+              }
               alt={data.movie.title}
               className="w-32 h-auto object-cover"
             />
@@ -136,14 +146,26 @@ function CinemaDetailPage() {
         ) : sessionTimes.length > 0 ? (
           <div className="flex gap-2 flex-wrap">
             {/* render each time as a button */}
-            {sessionTimes.map((s) => (
-              <button
-                key={s.id}
-                className="px-4 py-2 bg-green-500 text-white rounded"
-              >
-                {s.time}
-              </button>
-            ))}
+            {sessionTimes.map((s) =>
+              s.bookingUrl ? (
+                <a
+                  key={s.id}
+                  href={s.bookingUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-4 py-2 bg-green-500 text-white rounded"
+                >
+                  {s.time}
+                </a>
+              ) : (
+                <span
+                  key={s.id}
+                  className="px-4 py-2 bg-gray-200 text-gray-500 rounded"
+                >
+                  {s.time}
+                </span>
+              ),
+            )}
           </div>
         ) : (
           <div>
