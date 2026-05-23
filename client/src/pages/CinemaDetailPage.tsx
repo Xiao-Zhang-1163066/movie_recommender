@@ -56,19 +56,27 @@ function CinemaDetailPage() {
     return cinemaSessions;
   }, [cinema]);
 
+  // Sort only by total sessions so poster order never changes when the date changes.
   const sortedEntries = useMemo(() => {
-    const onDate = (d: Record<string, string[]>) =>
-      (d[selectedDate] ?? []).length;
     const total = (d: Record<string, string[]>) =>
       Object.values(d).reduce((sum, times) => sum + times.length, 0);
-    return Object.entries(cinemaSessions).sort(([, a], [, b]) => {
-      const byDate = onDate(b.dates) - onDate(a.dates);
-      return byDate !== 0 ? byDate : total(b.dates) - total(a.dates);
-    });
-  }, [cinemaSessions, selectedDate]);
+    return Object.entries(cinemaSessions).sort(
+      ([, a], [, b]) => total(b.dates) - total(a.dates),
+    );
+  }, [cinemaSessions]);
+
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: TZ });
 
   // fall back to first movie (most sessions) if nothing is selected yet
   const effectiveTmdbId = selectedTmdbId ?? sortedEntries[0]?.[0] ?? null;
+
+  // All session dates for the active movie that are today-or-later, sorted.
+  const availableDates = useMemo(() => {
+    if (!effectiveTmdbId || !cinemaSessions[effectiveTmdbId]) return [];
+    return Object.keys(cinemaSessions[effectiveTmdbId].dates)
+      .filter((d) => d >= today)
+      .sort();
+  }, [effectiveTmdbId, cinemaSessions, today]);
 
   // step 5: derive sessionTimes — sessions for selectedMovieId on selectedDate;
   // (or [] if nothing selected)
@@ -111,10 +119,13 @@ function CinemaDetailPage() {
           <div
             key={tmdbId}
             onClick={() => {
+              // Jump to the first future session date for this movie so the
+              // DatePicker always highlights a real date after switching movies.
+              const firstDate = Object.keys(data.dates)
+                .filter((d) => d >= today)
+                .sort()[0];
               setSelectedTmdbId(tmdbId);
-              setSelectedDate(
-                new Date().toLocaleDateString("en-CA", { timeZone: TZ }),
-              );
+              setSelectedDate(firstDate ?? today);
             }}
             className={`cursor-pointer rounded overflow-hidden border-2 ${
               tmdbId === effectiveTmdbId
@@ -136,8 +147,12 @@ function CinemaDetailPage() {
         ))}
       </div>
 
-      {/* Date picker */}
-      <DatePicker selected={selectedDate} onChange={setSelectedDate} />
+      {/* Date picker — shows only this movie's session dates (today-or-later) */}
+      <DatePicker
+        selected={selectedDate}
+        onChange={setSelectedDate}
+        availableDates={availableDates}
+      />
 
       {/* Sessions */}
       <div className="mt-4">
