@@ -555,3 +555,27 @@ A: Fetching at render time means N TMDB API calls on every page load — one per
 
 Q: The server returned `voteAverage: undefined` after the migration. Why `undefined` and not `null`?
 A: `undefined` means the field doesn't exist on the object at all — the Prisma client didn't know about it. `null` would mean the field exists but has no value. The generated client is loaded once at server startup and cached in memory. `prisma migrate dev` regenerates the client on disk, but the running process still uses the old in-memory version. A server restart is required to load the new client.
+
+---
+
+## Phase 16 — Wire ShowtimesPage to Real Sessions API
+
+**What this module does**
+Replaces mock session data on `ShowtimesPage` with a real API call to `GET /api/sessions`. The backend session controller was extended to accept a `tmdbId` query param — it resolves that to an internal UUID before filtering, bridging the gap between TMDB IDs (used by the frontend URL) and internal UUIDs (used by the DB). The frontend fetches the flat sessions array, groups it by cinema using `forEach`, converts UTC timestamps to NZ local time, and renders one card per cinema with bookable session time links.
+
+**Key design decision**
+The controller accepts `tmdbId` and resolves it to an internal `movieId` before querying. The alternative — making the frontend look up the internal UUID first via a separate request — would add a network round-trip and leak internal ID logic to the client. Keeping the resolution server-side means the frontend only ever deals in TMDB IDs, which it already has from the movie detail page.
+
+**One thing I found surprising**
+`const { movieId } = req.query` destructures a snapshot — mutating `req.query.movieId` afterwards doesn't update the local `movieId` variable. The fix is `let` destructuring so the variable can be reassigned after the tmdbId lookup. This is a subtle JS gotcha: destructuring creates a copy of the value at that moment, not a live reference to the object property.
+
+**Interview Q&A**
+
+Q: ShowtimesPage receives a TMDB ID from the URL but sessions are stored with an internal UUID. How did you bridge that gap?
+A: In the session controller, when a `tmdbId` query param is present, we first call `prisma.movie.findUnique({ where: { tmdbId: parseInt(tmdbId) } })` to get the internal UUID, then use that UUID as the `movieId` filter for the session query. If no movie is found, we return 200 with an empty array — not a 404, because the endpoint itself is valid. This keeps ID resolution server-side so the frontend never has to know about internal UUIDs.
+
+Q: The API returns sessions as a flat array. How did you transform it into the grouped structure the UI needs?
+A: Used `forEach` to iterate the array and build a `Record<cinemaId, { cinema, sessions[] }>` object. For each session, check if the cinema key exists — if not, initialise it with the cinema info and an empty sessions array. Then push the session time into that cinema's array. `Object.values()` on the result gives an array of grouped cinema objects ready for `.map()` in the JSX.
+
+Q: Sessions are stored in UTC but the UI shows NZ local times. How did you handle the conversion?
+A: `new Date(session.startsAt).toLocaleTimeString("en-NZ", { timeZone: "Pacific/Auckland", hour: "2-digit", minute: "2-digit", hour12: false })`. The `Date` constructor parses the UTC ISO string correctly, and `toLocaleTimeString` with an explicit `timeZone` converts it to NZ local time for display. Splitting on `"T"` would give UTC time, which could be off by 12–13 hours.

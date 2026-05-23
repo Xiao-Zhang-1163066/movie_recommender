@@ -1,7 +1,21 @@
 import { prisma } from "../config/db.js";
 
 export const getSessions = async (req, res) => {
-  const { movieId, cinemaId, date } = req.query;
+  let { movieId, tmdbId, cinemaId, date } = req.query;
+  if (tmdbId) {
+    const movie = await prisma.movie.findUnique({
+      where: { tmdbId: parseInt(tmdbId) },
+    });
+    if (!movie) {
+      return res.status(200).json({
+        status: "success",
+        data: {
+          sessions: [],
+        },
+      });
+    }
+    movieId = movie.id;
+  }
   const sessionQuery = {
     movieId: movieId ? movieId : undefined,
     cinemaId: cinemaId ? cinemaId : undefined,
