@@ -579,3 +579,27 @@ A: Used `forEach` to iterate the array and build a `Record<cinemaId, { cinema, s
 
 Q: Sessions are stored in UTC but the UI shows NZ local times. How did you handle the conversion?
 A: `new Date(session.startsAt).toLocaleTimeString("en-NZ", { timeZone: "Pacific/Auckland", hour: "2-digit", minute: "2-digit", hour12: false })`. The `Date` constructor parses the UTC ISO string correctly, and `toLocaleTimeString` with an explicit `timeZone` converts it to NZ local time for display. Splitting on `"T"` would give UTC time, which could be off by 12–13 hours.
+
+---
+
+## Phase 24 — Watchlist UX: Delete + Notes Display
+
+**What this module does**
+Adds two missing UI features to `WatchlistPage`: a Remove button on each card that calls `DELETE /api/watchlist/:id` with a confirmation modal, and inline display of the `notes` field that was already being returned by the API but never rendered. No backend changes — the endpoint and data were already there.
+
+**Key design decision**
+The delete uses an optimistic update: the item is removed from React state immediately and the modal closes before the network request completes. A snapshot of the previous `items` array is taken before the mutation. If the fetch fails, the catch block calls `setItems(previousItems)` to restore the list. This makes the UI feel instant while still being correct on failure. The rollback works safely because `filter` returns a new array — the snapshot reference is never mutated.
+
+**One thing I found surprising**
+`const previous = items` does assign the same reference — both variables point at the same array object. But it's safe as a snapshot because React state updates are always immutable: `filter` creates a brand new array and `setItems` points state at that new one. The original array that `previous` points to is never touched, so the rollback is always valid.
+
+**Interview Q&A**
+
+Q: You have a delete button that removes an item. Walk me through how you handled the UI update — why not just refetch the whole list from the server?
+A: I used an optimistic update — I removed the item from local React state immediately, then fired the DELETE request in the background. This makes the UI feel instant. If the request fails, I restore the list from a snapshot taken before the mutation. Refetching would work but adds unnecessary latency for an action we're confident will succeed.
+
+Q: What happens in your implementation if the DELETE request fails? How does the user experience that?
+A: The catch block restores `items` to the snapshot taken before the optimistic remove, so the item reappears in the list. Currently the failure is only logged to the console — in production I'd surface a toast or error message so the user understands the removal didn't go through.
+
+Q: You used two separate Dialog components for two different modals. Why not one Dialog that switches content based on a flag?
+A: Single responsibility — each Dialog handles one concern. One Dialog switching on a flag would reduce JSX repetition but make each piece of logic conditional and harder to follow. With two Dialogs, you can read either one in isolation and immediately understand what it does. The repetition is worth the clarity.
