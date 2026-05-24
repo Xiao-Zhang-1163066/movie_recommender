@@ -603,3 +603,27 @@ A: The catch block restores `items` to the snapshot taken before the optimistic 
 
 Q: You used two separate Dialog components for two different modals. Why not one Dialog that switches content based on a flag?
 A: Single responsibility — each Dialog handles one concern. One Dialog switching on a flag would reduce JSX repetition but make each piece of logic conditional and harder to follow. With two Dialogs, you can read either one in isolation and immediately understand what it does. The repetition is worth the clarity.
+
+---
+
+## Phase 25 — Rate Limiting on /api/chat
+
+**What this module does**
+A dedicated `chatLimiter` middleware that caps each authenticated user to 10 requests per 15 minutes on `POST /api/chat`. Uses `express-rate-limit` with a custom `keyGenerator` that keys by `req.user.id` instead of IP address. The limiter sits in `chatRoutes.js` between `protect` and the `chat` controller.
+
+**Key design decision**
+The limiter is scoped to `chatRoutes.js`, not applied globally in `server.js`. Only `/chat` calls Gemini — other endpoints have no quota cost and shouldn't be restricted. Global rate limiting is for DDoS protection; per-route limiting is for quota-sensitive endpoints. Keeping it in the route file makes the intent obvious to anyone reading the code.
+
+**One thing I found surprising**
+`keyGenerator` reads `req.user.id`, which only exists because `protect` ran first and attached it. If you put the limiter before `protect` in the middleware chain, `req.user` would be `undefined` and `keyGenerator` would throw. Middleware order in Express is execution order — dependencies must come first.
+
+**Interview Q&A**
+
+Q: Where did you put the rate limiter and why not in `server.js`?
+A: In `chatRoutes.js`, scoped to the one route that calls Gemini. Other endpoints like `GET /movies` have no external API cost and don't need throttling. A global limiter in `server.js` would restrict everything — login, movie browsing, cinema pages — with no benefit. Rate limit at the narrowest scope that covers the risk.
+
+Q: Why key by `req.user.id` instead of IP address?
+A: IP is inaccurate in both directions. Many users can share one IP (office NAT, VPN, mobile carrier) — one user's requests burn the quota for everyone else. And a bad actor can rotate IPs to bypass the limit. Keying by `user.id` gives each authenticated user their own independent bucket, which is fairer and harder to abuse.
+
+Q: The limiter sits between `protect` and `chat`. Why can't it go before `protect`?
+A: `keyGenerator` reads `req.user.id` to identify the client. `req.user` is attached by `protect` after verifying the JWT. If the limiter ran before `protect`, `req.user` would be `undefined` and the key lookup would throw. In Express, middleware runs in the order it's declared — dependencies must come first.
