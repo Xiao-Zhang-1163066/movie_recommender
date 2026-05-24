@@ -19,20 +19,15 @@ function CinemaDetailPage() {
   const { slug } = useParams();
   const { isFetching: isLoading, cinema, error } = useCinema(slug!);
   const [searchParams] = useSearchParams();
-  const tmdbMovieId = searchParams.get("movieId"); // TMDb ID from query param
+  const tmdbMovieId = searchParams.get("movieId");
 
   const [selectedDate, setSelectedDate] = useState(() =>
     new Date().toLocaleDateString("en-CA", { timeZone: TZ }),
   );
-  const [selectedTmdbId, setSelectedTmdbId] = useState(tmdbMovieId); // TMDb ID
+  const [selectedTmdbId, setSelectedTmdbId] = useState(tmdbMovieId);
 
-  // step 4: use useMemo to build a grouped sessions object from cinema.sessions
-  // shape: { [movieId]: { movie, [date]: [time, time, ...] } }
-  // hint: use .reduce() over cinema.sessions
-  // hint: startsAt is an ISO string — split on "T" to get date, slice(11,16) to get time
-  // return {} if cinema is null
   const cinemaSessions = useMemo(() => {
-    const cinemaSessions = cinema
+    return cinema
       ? cinema.sessions.reduce(
           (acc, session) => {
             const tmdbId = session.movie.tmdbId.toString();
@@ -53,10 +48,8 @@ function CinemaDetailPage() {
           >,
         )
       : {};
-    return cinemaSessions;
   }, [cinema]);
 
-  // Sort only by total sessions so poster order never changes when the date changes.
   const sortedEntries = useMemo(() => {
     const total = (d: Record<string, string[]>) =>
       Object.values(d).reduce((sum, times) => sum + times.length, 0);
@@ -66,11 +59,8 @@ function CinemaDetailPage() {
   }, [cinemaSessions]);
 
   const today = new Date().toLocaleDateString("en-CA", { timeZone: TZ });
-
-  // fall back to first movie (most sessions) if nothing is selected yet
   const effectiveTmdbId = selectedTmdbId ?? sortedEntries[0]?.[0] ?? null;
 
-  // All session dates for the active movie that are today-or-later, sorted.
   const availableDates = useMemo(() => {
     if (!effectiveTmdbId || !cinemaSessions[effectiveTmdbId]) return [];
     return Object.keys(cinemaSessions[effectiveTmdbId].dates)
@@ -78,8 +68,6 @@ function CinemaDetailPage() {
       .sort();
   }, [effectiveTmdbId, cinemaSessions, today]);
 
-  // step 5: derive sessionTimes — sessions for selectedMovieId on selectedDate;
-  // (or [] if nothing selected)
   const sessionTimes = useMemo(() => {
     if (!effectiveTmdbId || !cinema) return [];
     return cinema.sessions
@@ -92,62 +80,80 @@ function CinemaDetailPage() {
       }));
   }, [effectiveTmdbId, selectedDate, cinema]);
 
-  // step 6: handle loading and error states
   if (isLoading) {
-    return <div className="p-6">Loading...</div>;
+    return (
+      <div
+        className="flex items-center justify-center min-h-[60vh] text-sm"
+        style={{ color: "var(--text-2)" }}
+      >
+        Loading…
+      </div>
+    );
   }
   if (error) {
-    return <div className="p-6 text-red-500">Error: {error}</div>;
+    return (
+      <div className="flex items-center justify-center min-h-[60vh] text-sm text-destructive">
+        {error}
+      </div>
+    );
   }
   if (!cinema) {
-    return <div className="p-6 text-red-500">Cinema not found</div>;
+    return (
+      <div className="flex items-center justify-center min-h-[60vh] text-sm text-destructive">
+        Cinema not found
+      </div>
+    );
   }
 
   const nextDate = Object.keys(
     effectiveTmdbId ? (cinemaSessions[effectiveTmdbId]?.dates ?? {}) : {},
   )
     .filter((date) => date > selectedDate)
-    .sort()[0]; // earliest future date with sessions
+    .sort()[0];
 
   return (
-    <div>
-      <h1 className="text-2xl font-bold mb-4">{cinema?.name}</h1>
+    <div className="px-10 py-10">
+      <h1
+        className="text-3xl font-black mb-8"
+        style={{ letterSpacing: "-0.03em" }}
+      >
+        {cinema.name}
+      </h1>
 
-      {/* Movie poster row — all movies at this cinema */}
-      <div className="flex gap-4 overflow-x-auto pb-2">
+      {/* Movie poster row */}
+      <div className="flex gap-3 overflow-x-auto pb-2 mb-6">
         {sortedEntries.map(([tmdbId, data]) => (
           <div
             key={tmdbId}
             onClick={() => {
-              // Jump to the first future session date for this movie so the
-              // DatePicker always highlights a real date after switching movies.
               const firstDate = Object.keys(data.dates)
                 .filter((d) => d >= today)
                 .sort()[0];
               setSelectedTmdbId(tmdbId);
               setSelectedDate(firstDate ?? today);
             }}
-            className={`cursor-pointer rounded overflow-hidden border-2 ${
-              tmdbId === effectiveTmdbId
-                ? "border-red-500"
-                : "border-transparent"
-            }`}
+            className="cursor-pointer shrink-0 overflow-hidden transition-all"
+            style={{
+              borderRadius: "12px",
+              border:
+                tmdbId === effectiveTmdbId
+                  ? "2px solid var(--lime)"
+                  : "2px solid transparent",
+            }}
           >
-            {/* poster image — use IMG_URL from tmdb.ts + movies[tmdbId]?.poster_path */}
-            {/* fallback if poster not loaded yet */}
             <img
               src={
                 data.movie.posterUrl ??
                 "https://via.placeholder.com/200x300?text=No+Poster"
               }
               alt={data.movie.title}
-              className="w-32 h-auto object-cover"
+              className="w-28 h-auto object-cover"
             />
           </div>
         ))}
       </div>
 
-      {/* Date picker — shows only this movie's session dates (today-or-later) */}
+      {/* Date picker */}
       <DatePicker
         selected={selectedDate}
         onChange={setSelectedDate}
@@ -155,12 +161,13 @@ function CinemaDetailPage() {
       />
 
       {/* Sessions */}
-      <div className="mt-4">
+      <div className="mt-5">
         {!effectiveTmdbId ? (
-          <p className="text-gray-400">Select a movie to see sessions</p>
+          <p className="text-sm" style={{ color: "var(--text-2)" }}>
+            Select a movie to see sessions.
+          </p>
         ) : sessionTimes.length > 0 ? (
           <div className="flex gap-2 flex-wrap">
-            {/* render each time as a button */}
             {sessionTimes.map((s) =>
               s.bookingUrl ? (
                 <a
@@ -168,14 +175,16 @@ function CinemaDetailPage() {
                   href={s.bookingUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="px-4 py-2 bg-green-500 text-white rounded"
+                  className="px-4 py-2 text-xs font-bold rounded-full transition-opacity hover:opacity-80"
+                  style={{ background: "var(--lime)", color: "#000" }}
                 >
                   {s.time}
                 </a>
               ) : (
                 <span
                   key={s.id}
-                  className="px-4 py-2 bg-gray-200 text-gray-500 rounded"
+                  className="px-4 py-2 text-xs font-semibold rounded-full"
+                  style={{ background: "var(--chip-bg)", color: "var(--text-2)" }}
                 >
                   {s.time}
                 </span>
@@ -184,18 +193,21 @@ function CinemaDetailPage() {
           </div>
         ) : (
           <div>
-            <p className="text-gray-400 mb-2">No sessions on this date</p>
-            {/* "Check another date" button — calls setSelectedDate(nextDate) if nextDate exists */}
-            {/* if no nextDate, show "No more sessions available" */}
+            <p className="text-sm mb-3" style={{ color: "var(--text-2)" }}>
+              No sessions on this date.
+            </p>
             {nextDate ? (
               <button
                 onClick={() => setSelectedDate(nextDate)}
-                className="px-4 py-2 bg-blue-500 text-white rounded"
+                className="px-4 py-2 text-sm font-bold rounded-full transition-opacity hover:opacity-85"
+                style={{ background: "var(--lime)", color: "#000" }}
               >
                 Check {nextDate}
               </button>
             ) : (
-              <p className="text-gray-400">No more sessions available</p>
+              <p className="text-sm" style={{ color: "var(--text-2)" }}>
+                No more sessions available.
+              </p>
             )}
           </div>
         )}

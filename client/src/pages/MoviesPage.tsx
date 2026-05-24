@@ -3,14 +3,13 @@ import { getNowPlaying, IMG_URL, type Movie } from "@/api/tmdb";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 
-// new type — our DB shape
 type InTheaterMovie = {
   id: string;
   tmdbId: number | null;
   title: string;
   posterUrl: string | null;
   voteAverage: number | null;
-  overview: string | null; // add
+  overview: string | null;
   releaseYear: number;
 };
 
@@ -22,13 +21,64 @@ type WatchlistPayload = {
   releaseYear: number | null;
 };
 
+function MovieCard({
+  posterSrc,
+  title,
+  rating,
+  onClick,
+  watchlistButton,
+}: {
+  posterSrc: string | null;
+  title: string;
+  rating: string;
+  onClick: () => void;
+  watchlistButton?: React.ReactNode;
+}) {
+  return (
+    <div className="cursor-pointer group" onClick={onClick}>
+      <div
+        className="relative overflow-hidden"
+        style={{ borderRadius: "14px", background: "var(--surface-2)" }}
+      >
+        {posterSrc ? (
+          <img
+            src={posterSrc}
+            alt={title}
+            className="w-full aspect-2/3 object-cover group-hover:scale-[1.03] transition-transform duration-300"
+          />
+        ) : (
+          <div
+            className="w-full aspect-2/3 flex items-center justify-center text-4xl"
+            style={{ background: "var(--surface-3)" }}
+          >
+            🎬
+          </div>
+        )}
+        <div
+          className="absolute top-2 right-2 text-xs font-bold px-1.5 py-0.5 rounded-md"
+          style={{ background: "rgba(0,0,0,0.75)", color: "var(--lime)" }}
+        >
+          ★ {rating}
+        </div>
+      </div>
+      <p
+        className="mt-2 text-sm font-semibold truncate"
+        style={{ letterSpacing: "-0.01em" }}
+      >
+        {title}
+      </p>
+      {watchlistButton}
+    </div>
+  );
+}
+
 function MoviesPage() {
   const [movies, setMovies] = useState<Movie[]>([]);
   const [inTheaterMovies, setInTheaterMovies] = useState<InTheaterMovie[]>([]);
   const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [watchlistIds, setWatchlistIds] = useState<Set<number>>(new Set()); // Store TMDB IDs of movies in watchlist
+  const [watchlistIds, setWatchlistIds] = useState<Set<number>>(new Set());
   const { isAuthenticated } = useAuth();
 
   useEffect(() => {
@@ -60,30 +110,26 @@ function MoviesPage() {
     const fetchWatchlist = async () => {
       try {
         if (!isAuthenticated) {
-          setWatchlistIds(new Set()); // Clear watchlist IDs when user logs out
+          setWatchlistIds(new Set());
           return;
-        } else {
-          const response = await fetch("/api/watchlist", {
-            method: "GET",
-            credentials: "include",
-          });
-          if (response.ok) {
-            const data = await response.json();
-            const ids = new Set<number>(
-              data.data.watchlist.map(
-                (item: { movie: { tmdbId: number } }) => item.movie.tmdbId,
-              ),
-            );
-            setWatchlistIds(ids);
-          } else {
-            console.error("Failed to fetch watchlist");
-          }
+        }
+        const response = await fetch("/api/watchlist", {
+          method: "GET",
+          credentials: "include",
+        });
+        if (response.ok) {
+          const data = await response.json();
+          const ids = new Set<number>(
+            data.data.watchlist.map(
+              (item: { movie: { tmdbId: number } }) => item.movie.tmdbId,
+            ),
+          );
+          setWatchlistIds(ids);
         }
       } catch (error) {
         console.error("Error fetching watchlist:", error);
       }
     };
-
     fetchWatchlist();
   }, [isAuthenticated]);
 
@@ -91,16 +137,12 @@ function MoviesPage() {
     try {
       const response = await fetch("/api/watchlist", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify(payload),
       });
       if (response.ok) {
-        setWatchlistIds((prev) => new Set(prev).add(payload.tmdbId)); // Add to local watchlist IDs
-      } else {
-        console.error("Failed to add to watchlist");
+        setWatchlistIds((prev) => new Set(prev).add(payload.tmdbId));
       }
     } catch (error) {
       console.error("Error adding to watchlist:", error);
@@ -121,89 +163,73 @@ function MoviesPage() {
     };
     fetchMovies();
   }, []);
+
   if (isLoading) {
-    return <div className="p-6">Loading...</div>;
+    return (
+      <div
+        className="flex items-center justify-center min-h-[60vh] text-sm"
+        style={{ color: "var(--text-2)" }}
+      >
+        Loading…
+      </div>
+    );
   }
   if (error) {
-    return <div className="p-6 text-red-500">Error: {error}</div>;
+    return (
+      <div className="flex items-center justify-center min-h-[60vh] text-sm text-destructive">
+        {error}
+      </div>
+    );
   }
+
   return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold mb-6">In Theaters Now</h1>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+    <div className="px-10 py-10">
+      <SectionHeading title="In Theatres Now" />
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-14">
         {inTheaterMovies.map((movie) => (
-          <div
+          <MovieCard
             key={movie.id}
-            className="cursor-pointer"
+            posterSrc={movie.posterUrl}
+            title={movie.title}
+            rating={movie.voteAverage?.toFixed(1) ?? "N/A"}
             onClick={() => navigate(`/movies/${movie.tmdbId}`)}
-          >
-            {movie.posterUrl && (
-              <img
-                src={movie.posterUrl}
-                alt={movie.title}
-                className="w-full rounded-md"
-              />
-            )}
-
-            <p className="mt-2 text-center">{movie.title}</p>
-
-            <p className="text-center text-sm text-gray-500">
-              Rating: {movie.voteAverage ?? "N/A"}
-            </p>
-            {isAuthenticated && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation(); // Prevent navigating to movie details
-                  handleAddToWatchlist({
-                    tmdbId: movie.tmdbId!,
-                    title: movie.title,
-                    posterUrl: movie.posterUrl,
-                    overview: movie.overview,
-                    releaseYear: movie.releaseYear,
-                  });
-                }}
-                disabled={watchlistIds.has(movie.tmdbId!)} // Disable if already in watchlist
-                className={`mt-2 w-full px-2 py-1 text-sm rounded ${
-                  watchlistIds.has(movie.tmdbId!)
-                    ? "bg-gray-400 cursor-not-allowed"
-                    : "bg-blue-500 hover:bg-blue-600 text-white"
-                }`}
-              >
-                {watchlistIds.has(movie.tmdbId!)
-                  ? "In Watchlist"
-                  : "Add to Watchlist"}
-              </button>
-            )}
-          </div>
+            watchlistButton={
+              isAuthenticated ? (
+                <WatchlistButton
+                  inList={watchlistIds.has(movie.tmdbId!)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleAddToWatchlist({
+                      tmdbId: movie.tmdbId!,
+                      title: movie.title,
+                      posterUrl: movie.posterUrl,
+                      overview: movie.overview,
+                      releaseYear: movie.releaseYear,
+                    });
+                  }}
+                />
+              ) : undefined
+            }
+          />
         ))}
       </div>
-      <h1 className="text-2xl font-bold mb-6">Discover</h1>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+
+      <SectionHeading title="Discover" />
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
         {movies.map((movie) => (
-          <div
+          <MovieCard
             key={movie.id}
-            className="cursor-pointer"
+            posterSrc={movie.poster_path ? IMG_URL + movie.poster_path : null}
+            title={movie.title}
+            rating={movie.vote_average?.toFixed(1) ?? "N/A"}
             onClick={() => navigate(`/movies/${movie.id}`)}
-          >
-            {movie.poster_path && (
-              <img
-                src={IMG_URL + movie.poster_path}
-                alt={movie.title}
-                className="w-full rounded-md"
-              />
-            )}
-
-            <p className="mt-2 text-center">{movie.title}</p>
-
-            <p className="text-center text-sm text-gray-500">
-              Rating: {movie.vote_average}
-            </p>
-            {isAuthenticated && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation(); // Prevent navigating to movie details
-                  handleAddToWatchlist(
-                    {
+            watchlistButton={
+              isAuthenticated ? (
+                <WatchlistButton
+                  inList={watchlistIds.has(movie.id)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleAddToWatchlist({
                       tmdbId: movie.id,
                       title: movie.title,
                       posterUrl: movie.poster_path
@@ -213,26 +239,49 @@ function MoviesPage() {
                       releaseYear: movie.release_date
                         ? parseInt(movie.release_date.split("-")[0])
                         : null,
-                    },
-                    // movie, --- IGNORE ---
-                  );
-                }}
-                disabled={watchlistIds.has(movie.id)} // Disable if already in watchlist
-                className={`mt-2 w-full px-2 py-1 text-sm rounded ${
-                  watchlistIds.has(movie.id)
-                    ? "bg-gray-400 cursor-not-allowed"
-                    : "bg-blue-500 hover:bg-blue-600 text-white"
-                }`}
-              >
-                {watchlistIds.has(movie.id)
-                  ? "In Watchlist"
-                  : "Add to Watchlist"}
-              </button>
-            )}
-          </div>
+                    });
+                  }}
+                />
+              ) : undefined
+            }
+          />
         ))}
       </div>
     </div>
+  );
+}
+
+function SectionHeading({ title }: { title: string }) {
+  return (
+    <h2
+      className="text-2xl font-black mb-6"
+      style={{ letterSpacing: "-0.03em" }}
+    >
+      {title}
+    </h2>
+  );
+}
+
+function WatchlistButton({
+  inList,
+  onClick,
+}: {
+  inList: boolean;
+  onClick: (e: React.MouseEvent) => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={inList}
+      className="mt-2 w-full py-1.5 text-xs font-bold rounded-full transition-opacity"
+      style={
+        inList
+          ? { background: "var(--chip-bg)", color: "var(--text-2)", cursor: "not-allowed" }
+          : { background: "var(--lime)", color: "#000" }
+      }
+    >
+      {inList ? "In Watchlist" : "+ Watchlist"}
+    </button>
   );
 }
 

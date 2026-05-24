@@ -16,8 +16,6 @@ const tomorrowStr = () => {
 };
 
 // Build the label for a YYYY-MM-DD string without timezone shift.
-// We construct the Date from year/month/day directly so the local clock
-// doesn't accidentally roll the date back by 12 hours.
 const dateLabel = (dateStr: string): string => {
   if (dateStr === todayStr()) return "TODAY";
   if (dateStr === tomorrowStr()) return "TOMORROW";
@@ -41,9 +39,6 @@ export default function DatePicker({
 }: DatePickerProps) {
   const today = todayStr();
 
-  // If a curated list is provided (session dates for the selected movie),
-  // show only those — filtered to today-or-later, sorted ascending.
-  // Otherwise fall back to seven consecutive days from today.
   const dates: string[] =
     availableDates && availableDates.length > 0
       ? [...availableDates].filter((d) => d >= today).sort()
@@ -54,7 +49,7 @@ export default function DatePicker({
         });
 
   return (
-    <div className="flex gap-2 overflow-x-auto py-2">
+    <div className="flex gap-2 overflow-x-auto py-2 scrollbar-none">
       {dates.map((dateStr) => {
         const isActive = dateStr === selected;
         return (
@@ -62,9 +57,13 @@ export default function DatePicker({
             key={dateStr}
             onClick={() => onChange(dateStr)}
             className={cn(
-              "rounded px-4 py-2 text-sm font-semibold whitespace-nowrap",
-              isActive ? "bg-red-500 text-white" : "bg-gray-800 text-gray-400",
+              "rounded-full px-4 py-2 text-xs font-bold whitespace-nowrap transition-colors",
             )}
+            style={
+              isActive
+                ? { background: "var(--lime)", color: "#000" }
+                : { background: "var(--chip-bg)", color: "var(--text-2)" }
+            }
           >
             {dateLabel(dateStr)}
           </button>

@@ -1,12 +1,10 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-
 import DatePicker from "@/components/DatePicker";
 
-// Shape of one session from the API
 type Session = {
   id: string;
-  startsAt: string; // UTC ISO string
+  startsAt: string;
   bookingUrl: string | null;
   cinema: {
     id: string;
@@ -16,7 +14,6 @@ type Session = {
   };
 };
 
-// Grouped structure: cinemaId → { cinema info, list of session times }
 type GroupedCinema = {
   cinema: Session["cinema"];
   sessions: { id: string; time: string; bookingUrl: string | null }[];
@@ -31,31 +28,19 @@ function ShowtimesPage() {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // step 1: fetch /api/sessions?tmdbId=<id>&date=<selectedDate>
-    // step 2: reduce the flat sessions array into grouped by cinemaId
-    //   hint: for each session, extract time with  toLocaleTimeString("en-NZ", { timeZone: "Pacific/Auckland", hour: "2-digit", minute: "2-digit", hour12: false })
-    //   hint: acc[cinemaId] ??= { cinema: session.cinema, sessions:[] }
-    //   hint: then push { id, time, bookingUrl } into acc[cinemaId].sessions
-    // step 3: setGrouped(result), setIsLoading(false)
-    //
     const fetchSessions = async () => {
       try {
         const response = await fetch(
           `/api/sessions?tmdbId=${id}&date=${selectedDate}`,
-          {
-            method: "GET",
-            credentials: "include",
-          },
+          { method: "GET", credentials: "include" },
         );
         if (!response.ok) {
-          console.error("Failed to fetch sessions");
           setIsLoading(false);
           return;
         }
         const data = await response.json();
         const sessions: Session[] = data.data.sessions;
 
-        // Group by cinemaId
         const groupedResult: Record<string, GroupedCinema> = {};
         sessions.forEach((session) => {
           const cinemaId = session.cinema.id;
@@ -66,10 +51,7 @@ function ShowtimesPage() {
             hour12: false,
           });
           if (!groupedResult[cinemaId]) {
-            groupedResult[cinemaId] = {
-              cinema: session.cinema,
-              sessions: [],
-            };
+            groupedResult[cinemaId] = { cinema: session.cinema, sessions: [] };
           }
           groupedResult[cinemaId].sessions.push({
             id: session.id,
@@ -88,49 +70,84 @@ function ShowtimesPage() {
     fetchSessions();
   }, [id, selectedDate]);
 
-  if (isLoading) return <div className="p-6">Loading...</div>;
+  if (isLoading) {
+    return (
+      <div
+        className="flex items-center justify-center min-h-[60vh] text-sm"
+        style={{ color: "var(--text-2)" }}
+      >
+        Loading…
+      </div>
+    );
+  }
+
+  const cinemaList = Object.values(grouped);
 
   return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold mb-4">Select a Cinema</h1>
+    <div className="px-10 py-10">
+      <h1
+        className="text-3xl font-black mb-2"
+        style={{ letterSpacing: "-0.03em" }}
+      >
+        Select a Cinema
+      </h1>
+      <p className="text-sm mb-6" style={{ color: "var(--text-2)" }}>
+        Pick a date and time then book directly.
+      </p>
 
       <DatePicker selected={selectedDate} onChange={setSelectedDate} />
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* step 4: Object.values(grouped).map(({ cinema, sessions }) => ... */}
-        {/* render a div with cinema.name, cinema.suburb */}
-        {/* and a span per session showing time — link to /cinemas/<cinema.slug> */}
-        {Object.values(grouped).map(({ cinema, sessions }) => (
-          <div
-            key={cinema.id}
-            className="border rounded p-4 cursor-pointer hover:shadow"
-            onClick={() => navigate(`/cinemas/${cinema.slug}`)}
-          >
-            <h2 className="text-lg font-semibold">{cinema.name}</h2>
-            <p className="text-sm text-gray-600">{cinema.suburb}</p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {sessions.map((session) =>
-                session.bookingUrl ? (
-                  <a
-                    key={session.id}
-                    href={session.bookingUrl!}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-3 py-1 rounded text-sm  bg-blue-500 hover:bg-blue-600 text-white"
-                  >
-                    {session.time}
-                  </a>
-                ) : (
-                  <span
-                    key={session.id}
-                    className={`px-3 py-1 rounded text-sm bg-gray-400 cursor-not-allowed`}
-                  >
-                    {session.time}
-                  </span>
-                ),
-              )}
+
+      <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+        {cinemaList.length === 0 ? (
+          <p className="text-sm col-span-2" style={{ color: "var(--text-2)" }}>
+            No sessions available for this date.
+          </p>
+        ) : (
+          cinemaList.map(({ cinema, sessions }) => (
+            <div
+              key={cinema.id}
+              className="p-5 cursor-pointer transition-colors"
+              style={{
+                background: "var(--surface-2)",
+                borderRadius: "16px",
+                border: "1px solid rgba(255,255,255,0.05)",
+              }}
+              onClick={() => navigate(`/cinemas/${cinema.slug}`)}
+            >
+              <p className="font-bold text-sm" style={{ letterSpacing: "-0.01em" }}>
+                {cinema.name}
+              </p>
+              <p className="text-xs mt-0.5" style={{ color: "var(--text-2)" }}>
+                {cinema.suburb}
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {sessions.map((session) =>
+                  session.bookingUrl ? (
+                    <a
+                      key={session.id}
+                      href={session.bookingUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="px-3 py-1.5 text-xs font-bold rounded-full transition-opacity hover:opacity-80"
+                      style={{ background: "var(--lime)", color: "#000" }}
+                    >
+                      {session.time}
+                    </a>
+                  ) : (
+                    <span
+                      key={session.id}
+                      className="px-3 py-1.5 text-xs font-semibold rounded-full"
+                      style={{ background: "var(--chip-bg)", color: "var(--text-2)" }}
+                    >
+                      {session.time}
+                    </span>
+                  ),
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          ))
+        )}
       </div>
     </div>
   );

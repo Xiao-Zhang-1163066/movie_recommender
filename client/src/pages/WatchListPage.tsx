@@ -23,6 +23,13 @@ type PendingChange = {
   movieTitle: string;
 } | null;
 
+const statusStyle: Record<WatchlistItem["status"], { bg: string; color: string }> = {
+  PLANNED:   { bg: "var(--chip-bg)",                     color: "var(--text-2)" },
+  WATCHING:  { bg: "rgba(198,244,50,0.12)",               color: "var(--lime)" },
+  COMPLETED: { bg: "rgba(50,200,100,0.12)",               color: "#4CD964" },
+  DROPPED:   { bg: "rgba(255,80,80,0.12)",                color: "#FF453A" },
+};
+
 function WatchlistPage() {
   const [items, setItems] = useState<WatchlistItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -34,26 +41,13 @@ function WatchlistPage() {
   useEffect(() => {
     const fetchWatchlist = async () => {
       try {
-        // step 1: GET /api/watchlist with credentials: "include"
-        // step 2: if response is not ok, throw an error
-        // step 3: parse JSON and setItems with the result
-        const response = await fetch("/api/watchlist", {
-          credentials: "include",
-        });
-        if (!response.ok) {
-          throw new Error("Failed to fetch watchlist");
-        }
+        const response = await fetch("/api/watchlist", { credentials: "include" });
+        if (!response.ok) throw new Error("Failed to fetch watchlist");
         const data = await response.json();
         setItems(data.data.watchlist);
       } catch (err) {
-        // step 4: setError with the error message
-        if (err instanceof Error) {
-          setError(err.message);
-        } else {
-          setError("An unknown error occurred");
-        }
+        setError(err instanceof Error ? err.message : "An unknown error occurred");
       } finally {
-        // step 5: setIsLoading(false)
         setIsLoading(false);
       }
     };
@@ -63,34 +57,22 @@ function WatchlistPage() {
   const wantToWatchItems = items.filter(
     (item) => item.status === "PLANNED" || item.status === "WATCHING",
   );
-
-  // TODO: derive watchedItems — filter items where status is COMPLETED or DROPPED
   const watchedItems = items.filter(
     (item) => item.status === "COMPLETED" || item.status === "DROPPED",
   );
-  const displayedItems =
-    activeTab === "watchlist" ? wantToWatchItems : watchedItems;
+  const displayedItems = activeTab === "watchlist" ? wantToWatchItems : watchedItems;
 
   async function handleRating(itemId: string, rating: number) {
-    // TODO: call PATCH /api/watchlist/:itemId with body { rating: newRating } and credentials: "include"
-    // TODO: if response is ok, update the item in state using the immutable .map() pattern
-    // (if it fails, you can ignore the error for now)
     try {
       const response = await fetch(`/api/watchlist/${itemId}`, {
         method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({ rating }),
       });
-      if (!response.ok) {
-        throw new Error("Failed to update rating");
-      }
-      setItems((prevItems) =>
-        prevItems.map((item) =>
-          item.id === itemId ? { ...item, rating } : item,
-        ),
+      if (!response.ok) throw new Error("Failed to update rating");
+      setItems((prev) =>
+        prev.map((item) => (item.id === itemId ? { ...item, rating } : item)),
       );
     } catch (err) {
       console.error(err);
@@ -107,17 +89,13 @@ function WatchlistPage() {
       if (rating !== undefined) body.rating = rating;
       const response = await fetch(`/api/watchlist/${itemId}`, {
         method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify(body),
       });
-      if (!response.ok) {
-        throw new Error("Failed to update status");
-      }
-      setItems((prevItems) =>
-        prevItems.map((item) =>
+      if (!response.ok) throw new Error("Failed to update status");
+      setItems((prev) =>
+        prev.map((item) =>
           item.id === itemId
             ? { ...item, status: newStatus, rating: rating ?? item.rating }
             : item,
@@ -128,14 +106,9 @@ function WatchlistPage() {
     }
   }
 
-  function openConfirmModal(
-    item: WatchlistItem,
-    newStatus: WatchlistItem["status"],
-  ) {
-    // TODO: if newStatus is COMPLETED or DROPPED, set pendingChange and reset pendingRating
-    // TODO: otherwise call handleStatusChange directly (no modal needed for PLANNED/WATCHING)
+  function openConfirmModal(item: WatchlistItem, newStatus: WatchlistItem["status"]) {
     if (newStatus === "COMPLETED" || newStatus === "DROPPED") {
-      setPendingChange({ itemId: item.id, newStatus });
+      setPendingChange({ itemId: item.id, newStatus, movieTitle: item.movie.title });
       setPendingRating("");
     } else {
       handleStatusChange(item.id, newStatus);
@@ -143,10 +116,6 @@ function WatchlistPage() {
   }
 
   async function handleConfirm() {
-    // TODO: if pendingChange is null, return early
-    // TODO: call handleStatusChange with pendingChange.itemId, pendingChange.newStatus,
-    //       and pendingRating (only pass it if pendingRating !== "")
-    // TODO: close the modal (set pendingChange to null, reset pendingRating)
     if (!pendingChange) return;
     const { itemId, newStatus } = pendingChange;
     await handleStatusChange(
@@ -159,161 +128,178 @@ function WatchlistPage() {
   }
 
   function handleCancel() {
-    // TODO: close the modal without doing anything
     setPendingChange(null);
     setPendingRating("");
   }
 
-  if (isLoading) return <div className="p-6">Loading...</div>;
-  if (error) return <div className="p-6 text-red-500">{error}</div>;
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh] text-sm" style={{ color: "var(--text-2)" }}>
+        Loading…
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh] text-sm text-destructive">
+        {error}
+      </div>
+    );
+  }
 
   return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold mb-4">My Watchlist</h1>
-      {/* TODO: render two tab buttons — "Want to Watch" and "Watched"
-             Each button sets activeTab on click.
-             The active tab should look visually different (e.g. font-bold or
-  underline). */}
-      <div className="mb-4">
-        <button
-          className={`mr-4 ${
-            activeTab === "watchlist" ? "font-bold underline" : ""
-          }`}
-          onClick={() => setActiveTab("watchlist")}
-        >
-          Want to Watch
-        </button>
-        <button
-          className={`${activeTab === "watched" ? "font-bold underline" : ""}`}
-          onClick={() => setActiveTab("watched")}
-        >
-          Watched
-        </button>
+    <div className="px-10 py-10 max-w-2xl">
+      <h1 className="text-3xl font-black mb-6" style={{ letterSpacing: "-0.03em" }}>
+        My Watchlist
+      </h1>
+
+      {/* Tab strip */}
+      <div className="flex gap-2 mb-8">
+        {(["watchlist", "watched"] as Tab[]).map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className="px-4 py-2 rounded-full text-sm font-semibold transition-colors"
+            style={
+              activeTab === tab
+                ? { background: "var(--lime)", color: "#000" }
+                : { background: "var(--chip-bg)", color: "var(--text-2)" }
+            }
+          >
+            {tab === "watchlist" ? "Want to Watch" : "Watched"}
+          </button>
+        ))}
       </div>
 
-      {/* if items is empty, show a message: "Your watchlist is empty. Ask the AI to add some movies!" */}
       {displayedItems.length === 0 ? (
-        <div className="text-gray-500">
-          Your watchlist is empty. Ask the AI to add some movies!
-        </div>
+        <p className="text-sm" style={{ color: "var(--text-2)" }}>
+          {activeTab === "watchlist"
+            ? "Nothing here yet. Browse movies and hit + Watchlist."
+            : "No watched films yet."}
+        </p>
       ) : (
         <div className="flex flex-col gap-3">
-          {displayedItems.map((item) => (
-            <div key={item.id} className="border rounded p-4">
-              {/* movie title */}
-              {/* status badge */}
-              {/* rating — only show if item.rating is not null */}
-              {item.movie.title}{" "}
-              <span
-                className={`ml-2 px-2 py-1 text-xs rounded ${
-                  item.status === "PLANNED"
-                    ? "bg-gray-200 text-gray-800"
-                    : item.status === "WATCHING"
-                      ? "bg-blue-200 text-blue-800"
-                      : item.status === "COMPLETED"
-                        ? "bg-green-200 text-green-800"
-                        : "bg-red-200 text-red-800"
-                }`}
+          {displayedItems.map((item) => {
+            const s = statusStyle[item.status];
+            return (
+              <div
+                key={item.id}
+                className="p-4 flex items-start gap-4"
+                style={{
+                  background: "var(--surface-2)",
+                  borderRadius: "14px",
+                  border: "1px solid rgba(255,255,255,0.05)",
+                }}
               >
-                {item.status}
-              </span>
-              {activeTab === "watched" && (
-                <div className="mt-2">
-                  <label htmlFor={`rating-${item.id}`} className="mr-2">
-                    Your Rating:
-                  </label>
-                  <select
-                    id={`rating-${item.id}`}
-                    value={item.rating ?? ""}
-                    onChange={(e) =>
-                      handleRating(item.id, Number(e.target.value))
-                    }
-                    className="border rounded p-1"
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-sm" style={{ letterSpacing: "-0.01em" }}>
+                    {item.movie.title}
+                  </p>
+                  {item.movie.genre && (
+                    <p className="text-xs mt-0.5" style={{ color: "var(--text-2)" }}>
+                      {item.movie.genre}
+                    </p>
+                  )}
+                  <span
+                    className="inline-block mt-2 px-2.5 py-0.5 rounded-full text-xs font-bold"
+                    style={{ background: s.bg, color: s.color }}
                   >
-                    <option value="">Rate...</option>
-                    {[...Array(10)].map((_, i) => (
-                      <option key={i + 1} value={i + 1}>
-                        {i + 1}
-                      </option>
-                    ))}
-                  </select>
+                    {item.status}
+                  </span>
+
+                  {activeTab === "watched" && (
+                    <div className="mt-3 flex items-center gap-2">
+                      <span className="text-xs" style={{ color: "var(--text-2)" }}>
+                        Rating
+                      </span>
+                      <select
+                        value={item.rating ?? ""}
+                        onChange={(e) => handleRating(item.id, Number(e.target.value))}
+                        className="text-xs rounded-lg px-2 py-1 font-semibold"
+                        style={{ background: "var(--chip-bg)", color: "var(--text-2)", border: "none" }}
+                      >
+                        <option value="">Rate…</option>
+                        {[...Array(10)].map((_, i) => (
+                          <option key={i + 1} value={i + 1}>
+                            {i + 1} / 10
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {activeTab === "watchlist" && (
+                    <div className="mt-3 flex items-center gap-2">
+                      <span className="text-xs" style={{ color: "var(--text-2)" }}>
+                        Status
+                      </span>
+                      <select
+                        value={item.status}
+                        onChange={(e) =>
+                          openConfirmModal(item, e.target.value as WatchlistItem["status"])
+                        }
+                        className="text-xs rounded-lg px-2 py-1 font-semibold"
+                        style={{ background: "var(--chip-bg)", color: "var(--text-2)", border: "none" }}
+                      >
+                        <option value="PLANNED">Planned</option>
+                        <option value="WATCHING">Watching</option>
+                        <option value="COMPLETED">Completed</option>
+                        <option value="DROPPED">Dropped</option>
+                      </select>
+                    </div>
+                  )}
                 </div>
-              )}
-              {activeTab === "watchlist" && (
-                <div className="mt-2">
-                  <label htmlFor={`status-${item.id}`} className="mr-2">
-                    Update Status:
-                  </label>
-                  <select
-                    id={`status-${item.id}`}
-                    value={item.status}
-                    onChange={(e) =>
-                      openConfirmModal(
-                        item,
-                        e.target.value as WatchlistItem["status"],
-                      )
-                    }
-                    className="border rounded p-1"
-                  >
-                    <option value="PLANNED">PLANNED</option>
-                    <option value="WATCHING">WATCHING</option>
-                    <option value="COMPLETED">COMPLETED</option>
-                    <option value="DROPPED">DROPPED</option>
-                  </select>
-                </div>
-              )}
-            </div>
-          ))}
+              </div>
+            );
+          })}
         </div>
       )}
 
-      {/* Modal */}
+      {/* Confirmation modal */}
       <Dialog open={pendingChange !== null} onOpenChange={handleCancel}>
-        <DialogContent>
+        <DialogContent style={{ background: "var(--surface-2)", border: "1px solid rgba(255,255,255,0.08)" }}>
           <DialogHeader>
-            <DialogTitle>
-              Mark{" "}
-              {pendingChange
-                ? items.find((item) => item.id === pendingChange.itemId)?.movie
-                    .title
-                : ""}{" "}
-              as watched?
+            <DialogTitle className="font-black" style={{ letterSpacing: "-0.02em" }}>
+              Mark as {pendingChange?.newStatus.toLowerCase()}?
             </DialogTitle>
           </DialogHeader>
+          <p className="text-sm" style={{ color: "var(--text-2)" }}>
+            {pendingChange?.movieTitle}
+          </p>
 
-          <div className="mt-4">
-            <label htmlFor="pending-rating" className="mr-2">
-              Your Rating:
-            </label>
+          <div className="mt-2 flex items-center gap-3">
+            <span className="text-sm" style={{ color: "var(--text-2)" }}>
+              Rating (optional)
+            </span>
             <select
-              id="pending-rating"
               value={pendingRating}
               onChange={(e) =>
-                setPendingRating(
-                  e.target.value === "" ? "" : Number(e.target.value),
-                )
+                setPendingRating(e.target.value === "" ? "" : Number(e.target.value))
               }
-              className="border rounded p-1"
+              className="text-sm rounded-lg px-2 py-1"
+              style={{ background: "var(--chip-bg)", color: "var(--text-2)", border: "none" }}
             >
-              <option value="">Rate...</option>
+              <option value="">No rating</option>
               {[...Array(10)].map((_, i) => (
                 <option key={i + 1} value={i + 1}>
-                  {i + 1}
+                  {i + 1} / 10
                 </option>
               ))}
             </select>
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="mt-4 gap-2">
             <button
               onClick={handleCancel}
-              className="mr-2 px-4 py-2 bg-gray-300 rounded hover:bg-gray-400"
+              className="px-4 py-2 text-sm font-semibold rounded-full"
+              style={{ background: "var(--chip-bg)", color: "var(--text-2)" }}
             >
               Cancel
             </button>
             <button
               onClick={handleConfirm}
-              className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+              className="px-4 py-2 text-sm font-bold rounded-full"
+              style={{ background: "var(--lime)", color: "#000" }}
             >
               Confirm
             </button>

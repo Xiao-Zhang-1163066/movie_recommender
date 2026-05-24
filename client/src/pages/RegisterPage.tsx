@@ -11,12 +11,6 @@ function RegisterPage() {
   const { login } = useAuth();
 
   async function handleSubmit(e: React.FormEvent) {
-    // step 1: prevent the default browser form submission
-    // step 2: clear any previous error
-    // step 3: POST to /api/auth/login with { email, password } as JSON body
-    //         include credentials: "include" so the browser stores the cookie
-    // step 4: if response is not ok, read the error message from the JSON body and set it
-    // step 5: if successful, navigate to "/movies"
     e.preventDefault();
     setError("");
     const response = await fetch("/api/auth/register", {
@@ -36,17 +30,32 @@ function RegisterPage() {
 
   return (
     <div
-      className="min-h-screen flex items-center
-justify-center"
+      className="min-h-screen flex items-center justify-center"
+      style={{ background: "var(--background)" }}
     >
       <div
-        className="w-full max-w-sm p-6 flex flex-col
-  gap-4"
+        className="w-full max-w-sm p-8 flex flex-col gap-6"
+        style={{
+          background: "var(--surface-2)",
+          borderRadius: "20px",
+          border: "1px solid rgba(255,255,255,0.07)",
+        }}
       >
-        <h1 className="text-2xl font-bold">Register</h1>
+        <div>
+          <p
+            className="text-2xl font-black mb-1"
+            style={{ letterSpacing: "-0.03em" }}
+          >
+            Create account
+          </p>
+          <p className="text-sm" style={{ color: "var(--text-2)" }}>
+            Join MovieMate and start building your watchlist.
+          </p>
+        </div>
 
-        {/* error message — only render if error is non-empty */}
-        {error && <p className="text-red-500">{error}</p>}
+        {error && (
+          <p className="text-sm text-destructive">{error}</p>
+        )}
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
           <input
@@ -54,7 +63,12 @@ justify-center"
             placeholder="Name"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="border rounded px-3 py-2"
+            className="w-full px-4 py-3 text-sm rounded-xl outline-none"
+            style={{
+              background: "var(--chip-bg)",
+              color: "var(--foreground)",
+              border: "1px solid rgba(255,255,255,0.07)",
+            }}
             required
           />
           <input
@@ -62,7 +76,12 @@ justify-center"
             placeholder="Email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="border rounded px-3 py-2"
+            className="w-full px-4 py-3 text-sm rounded-xl outline-none"
+            style={{
+              background: "var(--chip-bg)",
+              color: "var(--foreground)",
+              border: "1px solid rgba(255,255,255,0.07)",
+            }}
             required
           />
           <input
@@ -70,22 +89,26 @@ justify-center"
             placeholder="Password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="border rounded px-3 py-2"
+            className="w-full px-4 py-3 text-sm rounded-xl outline-none"
+            style={{
+              background: "var(--chip-bg)",
+              color: "var(--foreground)",
+              border: "1px solid rgba(255,255,255,0.07)",
+            }}
             required
           />
           <button
             type="submit"
-            className="bg-blue-500 text-white rounded px-4 py-2"
+            className="w-full py-3.5 text-sm font-bold rounded-full mt-1 transition-opacity hover:opacity-85"
+            style={{ background: "var(--lime)", color: "#000" }}
           >
-            Register
+            Create Account
           </button>
         </form>
 
-        {/* link to register page — "Don't have an
-account? Register" */}
-        <p className="text-sm">
+        <p className="text-sm text-center" style={{ color: "var(--text-2)" }}>
           Already have an account?{" "}
-          <Link to="/login" className="text-blue-500">
+          <Link to="/login" className="font-semibold" style={{ color: "var(--lime)" }}>
             Login
           </Link>
         </p>
