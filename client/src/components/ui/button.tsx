@@ -19,6 +19,9 @@ const buttonVariants = cva(
         destructive:
           "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive/40",
         link: "text-primary underline-offset-4 hover:underline",
+        lime: "rounded-full bg-[var(--lime)] text-black font-bold hover:opacity-90",
+        muted: "rounded-full bg-[var(--chip-bg)] text-[var(--text-2)] font-semibold hover:opacity-80",
+        danger: "rounded-full bg-[var(--danger)] text-white font-bold hover:opacity-90",
       },
       size: {
         default:
