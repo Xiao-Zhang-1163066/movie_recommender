@@ -150,3 +150,25 @@ A: `useState` ignores the new initial value — it only reads it on first mount.
 
 Q: Why use `Promise.all` instead of sequential awaits to fetch movie details?
 A: Sequential awaits fetch one movie, wait for it, then fetch the next — total time is the sum of all requests. `Promise.all` fires all fetches in parallel and resolves when the last one completes — total time is the slowest single request. For 4 movies, `Promise.all` is roughly 4x faster.
+
+## Phase 18 — React Query + Self-Contained Components Refactor
+
+**What this module does**
+The watchlist feature was refactored to use React Query for server state and URL params for shared UI state. Each component now owns its data and logic via custom hooks — `WatchlistCard` calls its own mutation hooks and renders its own dialogs inline. `WatchlistPage` is reduced to a layout shell with no hooks or props.
+
+**Key design decision**
+`activeTab` is stored in the URL (`?tab=watchlist`) via `useSearchParams` rather than in a shared `useState` or context. Both `TabStrip` and `ItemList` call `useActiveTab()` independently and stay in sync because they read from the same URL — no parent needed to coordinate them. This is the URL-as-state pattern: it also makes the active tab bookmarkable and shareable for free.
+
+**One thing I found surprising**
+Calling `useWatchlistMutations()` inside every `WatchlistCard` does not create 10 conflicting mutation instances. Each `useMutation` call is independent, but they all invalidate the same `["watchlistItems"]` query key on success. React Query deduplicates the refetch — only one network request fires regardless of how many cards triggered invalidation.
+
+**Interview Q&A**
+
+Q: What's the difference between server state and UI state? Give an example of each.
+A: Server state is data that lives on the backend — it's fetched async, can be stale, and is shared across the app. `watchlistItems` is server state, managed by React Query. UI state lives only in the browser, is synchronous, and is local to a feature — `activeTab`, `pendingChange`, and `pendingRating` are UI state managed by `useState` or URL params.
+
+Q: Why did you move `StatusChangeDialog` and `DeleteDialog` inside `WatchlistCard`?
+A: Co-location — keep logic as close as possible to where it's used. The card now brings everything it needs with it. You can drop it onto any page without the parent needing to know about delete confirmations or status change modals. The pattern is called co-location and it's what makes components reusable.
+
+Q: You call `useActiveTab()` in both `TabStrip` and `ItemList`. Could they get out of sync?
+A: No. Both hooks read from `useSearchParams` — the same URL. When `TabStrip` calls `setSearchParams`, React Router updates the URL and re-renders every component reading that param. There's one source of truth and it's the URL.

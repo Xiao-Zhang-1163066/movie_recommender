@@ -1,20 +1,16 @@
 import { WatchlistCard } from "./WatchlistCard";
-import type { WatchlistItem, WatchlistStatus, Tab } from "./types";
+import { useActiveTab } from "./useActiveTab";
+import { useWatchlistItems } from "./useWatchlistItems";
 
-type Props = {
-  isLoading: boolean;
-  error: string;
-  activeTab: Tab;
-  displayedItems: WatchlistItem[];
-  onStatusChange: (item: WatchlistItem, newStatus: WatchlistStatus) => void;
-  onRating: (itemId: string, rating: number) => void;
-  onDelete: (itemId: string) => void;
-};
-
-export function ItemList({ isLoading, error, activeTab, displayedItems, onStatusChange, onRating, onDelete }: Props) {
+export function ItemList() {
+  const { isLoading, error, displayedItems } = useWatchlistItems();
+  const { activeTab } = useActiveTab();
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-[60vh] text-sm" style={{ color: "var(--text-2)" }}>
+      <div
+        className="flex items-center justify-center min-h-[60vh] text-sm"
+        style={{ color: "var(--text-2)" }}
+      >
         Loading…
       </div>
     );
@@ -23,7 +19,7 @@ export function ItemList({ isLoading, error, activeTab, displayedItems, onStatus
   if (error) {
     return (
       <div className="flex items-center justify-center min-h-[60vh] text-sm text-destructive">
-        {error}
+        {error instanceof Error ? error.message : "Something went wrong"}
       </div>
     );
   }
@@ -41,14 +37,7 @@ export function ItemList({ isLoading, error, activeTab, displayedItems, onStatus
   return (
     <div className="flex flex-col gap-3">
       {displayedItems.map((item) => (
-        <WatchlistCard
-          key={item.id}
-          item={item}
-          activeTab={activeTab}
-          onStatusChange={onStatusChange}
-          onRating={onRating}
-          onDelete={onDelete}
-        />
+        <WatchlistCard key={item.id} item={item} />
       ))}
     </div>
   );

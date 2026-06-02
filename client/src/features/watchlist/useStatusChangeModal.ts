@@ -1,15 +1,20 @@
 import { useState } from "react";
 import type { WatchlistItem, WatchlistStatus, PendingChange } from "./types";
+import { useWatchlistMutations } from "./useWatchlistMutations";
 
-export function useStatusChangeModal(
-  handleStatusChange: (id: string, status: WatchlistStatus, rating?: number) => Promise<void>,
-) {
+export function useStatusChangeModal() {
   const [pendingChange, setPendingChange] = useState<PendingChange>(null);
   const [pendingRating, setPendingRating] = useState<number | "">("");
 
+  const { handleStatusChange } = useWatchlistMutations();
+
   function openConfirmModal(item: WatchlistItem, newStatus: WatchlistStatus) {
     if (newStatus === "COMPLETED" || newStatus === "DROPPED") {
-      setPendingChange({ itemId: item.id, newStatus, movieTitle: item.movie.title });
+      setPendingChange({
+        itemId: item.id,
+        newStatus,
+        movieTitle: item.movie.title,
+      });
       setPendingRating("");
     } else {
       handleStatusChange(item.id, newStatus);
@@ -32,5 +37,12 @@ export function useStatusChangeModal(
     setPendingRating("");
   }
 
-  return { pendingChange, pendingRating, setPendingRating, openConfirmModal, handleConfirm, handleCancel };
+  return {
+    pendingChange,
+    pendingRating,
+    setPendingRating,
+    openConfirmModal,
+    handleConfirm,
+    handleCancel,
+  };
 }

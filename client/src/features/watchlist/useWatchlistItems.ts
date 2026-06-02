@@ -1,25 +1,29 @@
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useActiveTab } from "./useActiveTab";
 import { getWatchlist } from "@/services/watchlistService";
-import type { WatchlistItem, Tab } from "./types";
+import type { WatchlistItem } from "./types";
 
 export function useWatchlistItems() {
-  const [items, setItems] = useState<WatchlistItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [activeTab, setActiveTab] = useState<Tab>("watchlist");
+  const { activeTab } = useActiveTab();
+  const {
+    data: watchlistItems = [],
+    isLoading,
+    error,
+  } = useQuery<WatchlistItem[]>({
+    queryKey: ["watchlistItems"],
+    queryFn: getWatchlist,
+  });
 
-  useEffect(() => {
-    getWatchlist()
-      .then(setItems)
-      .catch((err) => setError(err instanceof Error ? err.message : "An unknown error occurred"))
-      .finally(() => setIsLoading(false));
-  }, []);
-
-  const displayedItems = items.filter((item) =>
+  const displayedItems = watchlistItems.filter((watchlistItem) =>
     activeTab === "watchlist"
-      ? item.status === "PLANNED" || item.status === "WATCHING"
-      : item.status === "COMPLETED" || item.status === "DROPPED",
+      ? watchlistItem.status === "PLANNED" ||
+        watchlistItem.status === "WATCHING"
+      : watchlistItem.status === "COMPLETED" ||
+        watchlistItem.status === "DROPPED",
   );
-
-  return { items, setItems, isLoading, error, activeTab, setActiveTab, displayedItems };
+  return {
+    isLoading,
+    error,
+    displayedItems,
+  };
 }
