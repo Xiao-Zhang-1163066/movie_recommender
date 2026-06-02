@@ -7,6 +7,7 @@ export type WatchlistItem = {
   notes: string | null;
   movie: {
     id: string;
+    tmdbId: number | null;
     title: string;
     genre: string | null;
     posterUrl: string | null;
@@ -22,7 +23,10 @@ export type PendingChange = {
   movieTitle: string;
 } | null;
 
-export const statusStyle: Record<WatchlistStatus, { bg: string; color: string }> = {
+export const statusStyle: Record<
+  WatchlistStatus,
+  { bg: string; color: string }
+> = {
   PLANNED: { bg: "var(--chip-bg)", color: "var(--text-2)" },
   WATCHING: { bg: "rgba(198,244,50,0.12)", color: "var(--lime)" },
   COMPLETED: { bg: "rgba(50,200,100,0.12)", color: "#4CD964" },

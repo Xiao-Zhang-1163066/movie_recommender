@@ -1,5 +1,27 @@
 # Learnings
 
+## Phase 26 — Refactor MoviesPage to Feature-Folder Pattern
+
+**What this module does**
+Migrates `MoviesPage.tsx` from a 288-line monolithic component into a feature-folder structure under `features/movies/`. The page itself becomes a thin 15-line orchestrator. Data fetching lives in React Query hooks, API calls live in a service layer, and each UI concern lives in its own file.
+
+**Key design decision**
+`MovieCard` was made a smart component — it calls `useWatchlistIds`, `useAddToWatchlist`, and `useAuth` internally. This means parent components only pass movie data; they never touch watchlist logic. The trade-off is that `MovieCard` is now coupled to watchlist state, but for this app that coupling is acceptable and keeps every caller simple.
+
+**One thing I found surprising**
+`useWatchlistIds` reuses `queryKey: ["watchlistItems"]` with a `select` option instead of making its own fetch. React Query deduplicates requests by key — so `useWatchlistItems` (on WatchlistPage) and `useWatchlistIds` (on MoviesPage) share one HTTP request and one cache entry, each transforming the data into a different shape via `select`. No second request is fired.
+
+**Interview Q&A**
+
+Q: How does MoviesPage load its data?
+A: React Query hooks are called during render. On first render they return `isLoading: true` with empty defaults, and the component shows a loading state. When the fetch resolves, React Query writes to the cache and triggers a re-render with the real data. The component never manually manages loading state with `useState` or `useEffect`.
+
+Q: Why does `useWatchlistIds` use `select` instead of its own `queryFn`?
+A: Two hooks share the same `queryKey: ["watchlistItems"]`. React Query deduplicates the fetch — one HTTP request, two consumers each getting a different shape via `select`. `useWatchlistItems` gets `WatchlistItem[]` for rendering the list; `useWatchlistIds` gets `Set<number>` for checking membership. This is the derived state pattern.
+
+Q: What's the difference between a presentational and a smart component?
+A: A presentational component only contains render logic — it receives props and returns JSX. A smart component calls hooks and owns its own data or side effects. In this project, `MovieGrid` is presentational — it renders a CSS grid around children. `MovieCard` is smart — it calls `useWatchlistIds`, `useAddToWatchlist`, and `useAuth` internally so no parent needs to know about watchlist logic.
+
 ## Phase 1 — Auth Middleware
 
 **What this module does**
