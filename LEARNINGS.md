@@ -649,3 +649,18 @@ A: IP is inaccurate in both directions. Many users can share one IP (office NAT,
 
 Q: The limiter sits between `protect` and `chat`. Why can't it go before `protect`?
 A: `keyGenerator` reads `req.user.id` to identify the client. `req.user` is attached by `protect` after verifying the JWT. If the limiter ran before `protect`, `req.user` would be `undefined` and the key lookup would throw. In Express, middleware runs in the order it's declared — dependencies must come first.
+
+---
+
+## Note — React list keys: index vs stable ID
+
+**The rule**
+Using `key={index}` on a mapped list is safe only when the list is append-only (items never reorder or get deleted). In all other cases, use a stable ID from the data.
+
+**Why it matters**
+React uses `key` to match DOM nodes between renders. With index keys, deleting item 0 shifts every key down by one — React thinks item at position 0 is the *same node* as before and reuses its DOM node, just swapping text. For stateful elements (inputs, animations, focused elements) this causes silent bugs.
+
+With a stable UUID/ID, React knows exactly which node was removed and destroys only that one.
+
+**The interview answer**
+"I used index here because this list is append-only — messages are never deleted or reordered, so React won't get confused. In production I'd use a server-assigned message ID to be safe and to make debugging easier in React DevTools."
