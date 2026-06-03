@@ -1,6 +1,4 @@
 export interface Cinema {
-  // fill in the fields from the Cinema model
-  // id, name, slug, address, suburb, latitude, longitude, websiteUrl, bookingUrl;
   id: string;
   name: string;
   slug: string;

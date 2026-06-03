@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import type { Cinema } from "@/types/cinema";
+import type { Cinema } from "@/features/cinemas/types";
 
 function useCinema(slug: string) {
   const [isLoading, setIsLoading] = useState<boolean>(true);

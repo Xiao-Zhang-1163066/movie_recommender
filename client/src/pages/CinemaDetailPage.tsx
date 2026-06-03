@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import DatePicker from "@/components/DatePicker";
 import useCinema from "@/hooks/useCinema";
-import type { Session } from "@/types/cinema";
+import type { Session } from "@/features/cinemas/types";
 
 const TZ = "Pacific/Auckland";
 const getNZDate = (iso: string) =>

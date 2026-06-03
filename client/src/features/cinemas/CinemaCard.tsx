@@ -1,11 +1,7 @@
 import { Link } from "react-router-dom";
-import type { Cinema } from "@/types/cinema";
+import type { Cinema } from "./types";
 
-interface CinemaCardProps {
-  cinema: Cinema;
-}
-
-function CinemaCard({ cinema }: CinemaCardProps) {
+function CinemaCard({ cinema }: { cinema: Cinema }) {
   const { slug, name, suburb, websiteUrl } = cinema;
   return (
     <Link to={`/cinemas/${slug}`}>
