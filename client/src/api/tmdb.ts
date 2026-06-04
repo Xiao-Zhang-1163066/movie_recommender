@@ -26,13 +26,24 @@ export async function getNowPlaying() {
   return data.results;
 }
 
+export interface CastMember {
+  id: number;
+  name: string;
+  character: string;
+  profile_path: string | null;
+}
+
 export interface MovieDetail extends Movie {
   runtime: number;
   genres: { id: number; name: string }[];
+  credits?: { cast: CastMember[] };
 }
 
 export async function getMovieById(id: string) {
-  const res = await fetch(`${BASE_URL}/movie/${id}?api_key=${API_KEY}`);
+  // append_to_response=credits pulls cast in the same request.
+  const res = await fetch(
+    `${BASE_URL}/movie/${id}?api_key=${API_KEY}&append_to_response=credits`,
+  );
   if (!res.ok) {
     throw new Error("Failed to fetch movie details");
   }

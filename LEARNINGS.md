@@ -664,3 +664,39 @@ With a stable UUID/ID, React knows exactly which node was removed and destroys o
 
 **The interview answer**
 "I used index here because this list is append-only — messages are never deleted or reordered, so React won't get confused. In production I'd use a server-assigned message ID to be safe and to make debugging easier in React DevTools."
+
+---
+
+## Phase 27 — Movie Cards Inside Chat (US-2.4)
+
+**What this module does**
+Lets the concierge surface recommended films as visual cards inline in the chat instead of a wall of text. The agent calls a dedicated `recommend_movies` tool with the TMDB ids it picked; the tool's `execute` enriches each id into a card payload (poster, rating, runtime, year, overview) from TMDB. The backend streams a custom NDJSON protocol off `streamText`'s `fullStream` — one JSON object per line, either a text delta or a movies array. The frontend parses those lines, renders a responsive `ChatMovieCard` grid inside the assistant message, and opens a `MovieDetailModal` (synopsis, cast, today's showtimes) on click, built on the shadcn `Dialog`.
+
+**Key design decision 1 — how the agent emits structured movie references**
+A dedicated `recommend_movies` tool whose Zod `inputSchema` *is* the "defined output schema". The alternative was to render the results of the existing `search_movies` / `get_movie_details` tools, but those return different, partial shapes (no poster, no rating). One purpose-built tool gives a single, card-ready payload and an explicit signal — "show these as cards" — that the agent chooses to send. Its `execute` re-fetches poster/rating/runtime from TMDB so the model can never invent them; the model only supplies ids.
+
+**Key design decision 2 — transport for the structured data**
+Kept the hand-rolled stream reader rather than adopting `@ai-sdk/react`'s `useChat`. Instead of parsing the AI SDK's internal wire format, the backend iterates `result.fullStream` and writes its *own* minimal NDJSON protocol (`{t:"text"}` / `{t:"movies"}` / `{t:"error"}`). This keeps full control of the format, adds no dependency, and means the existing reader only needed a line-buffering parser. The trade-off: we hand-write the protocol on both ends instead of getting typed message "parts" for free.
+
+**One thing I found surprising (1) — `req 'close'` fires immediately**
+The first version aborted the model on `req.on("close")` to cancel work if the client disconnects. The chat returned *nothing*. A timing test showed `req 'close'` fires ~1ms after the request — as soon as `express.json()` finishes reading the body — not when the client disconnects. So the model was aborted before it produced a token. The fix is to listen on the *response*: `res.on("close")` with a `!res.writableEnded` guard, which fires only on a genuine mid-stream disconnect.
+
+**One thing I found surprising (2) — `ai@6` renamed `parameters` to `inputSchema`**
+Every existing tool in `chatController.js` used `parameters: z.object(...)`, but in `ai@6` the `tool()` helper (from `@ai-sdk/provider-utils`) reads only `inputSchema` — there is no `parameters` fallback, in the types or at runtime. The tools were registering with an undefined schema, so tool-calling couldn't work. Renaming `parameters` → `inputSchema` on all of them was required for the whole search → recommend flow.
+
+**Interview Q&A**
+
+Q: How does the agent get movies to render as cards instead of plain text?
+A: It calls a `recommend_movies` tool with the TMDB ids it chose. The tool's `execute` fetches each movie from TMDB and returns a card-shaped payload. The backend watches `fullStream` for that tool's `tool-result` part and streams it to the client as a `{t:"movies"}` NDJSON line, which the frontend renders as a card grid. The model supplies only ids, so it can never hallucinate a poster or rating.
+
+Q: Why invent your own NDJSON protocol instead of using the AI SDK's UI message stream?
+A: We wanted to keep the existing hand-rolled reader and avoid coupling the client to the SDK's internal wire format. Iterating `fullStream` lets us emit a tiny, stable protocol we own — one JSON object per line, tagged `text`, `movies`, or `error`. The client splits on newlines, buffers any partial trailing line, and `JSON.parse`s each complete line. It's a few lines on each side and has no version-fragility against the SDK's stream encoding.
+
+Q: Your chat returned nothing at first. How did you debug it, and what was wrong?
+A: The model worked in an isolated script, so the bug was in the controller wiring. I'd aborted the model on `req.on("close")`. A small HTTP timing test showed `req 'close'` fires ~1ms in — right after the body is read — not on disconnect, so the `AbortController` killed the model instantly. Switching to `res.on("close")` guarded by `!res.writableEnded` fixed it: it aborts only when the client really drops mid-stream.
+
+Q: Why does the `MovieDetailModal` use the shadcn `Dialog` rather than a hand-rolled overlay?
+A: The shadcn `Dialog` is Radix-based, so it gives Escape-to-close, backdrop click, focus trapping, scroll locking, and portal rendering for free — all the accessibility behaviour you'd otherwise reimplement and get subtly wrong. We just pass `open` and `onOpenChange` and style `DialogContent`. It also keeps the modal consistent with the rest of the app's UI.
+
+Q: The modal needs cast, which the detail endpoint didn't return. How did you add it without a second round-trip?
+A: TMDB supports `append_to_response=credits` on the movie details request, which nests `credits.cast` in the same response. I widened `getMovieById` to request it and extended the `MovieDetail` type with an optional `credits`. Showtimes reuse the existing `/api/sessions?tmdbId=` endpoint and the same group-by-cinema logic as `ShowtimesPage`, fetched in parallel with the details via `Promise.all`.

@@ -3,12 +3,23 @@ import ChatInput from "@/features/chat/ChatInput";
 import { useChat } from "@/features/chat/useChat";
 
 function ChatPage() {
-  const { messages, streamingText, isLoading, input, setInput, sendMessage } =
-    useChat();
+  const {
+    messages,
+    streamingText,
+    streamingMovies,
+    isLoading,
+    input,
+    setInput,
+    sendMessage,
+  } = useChat();
 
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)]">
-      <MessageList messages={messages} streamingText={streamingText} />
+      <MessageList
+        messages={messages}
+        streamingText={streamingText}
+        streamingMovies={streamingMovies}
+      />
 
       <ChatInput
         input={input}
