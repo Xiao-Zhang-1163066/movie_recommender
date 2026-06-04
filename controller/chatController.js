@@ -160,6 +160,31 @@ export const chat = async (req, res, next) => {
         },
       }),
 
+      get_now_showing: tool({
+        description:
+          "List movies currently showing in Christchurch cinemas (from scraped sessions). Use this to ground recommendations — at least one recommended movie must come from this list.",
+        // No inputs: it always returns the full now-showing set.
+        inputSchema: z.object({}),
+        execute: async () => {
+          const now = new Date();
+
+          const movies = await prisma.movie.findMany({
+            where: {
+              sessions: { some: { startsAt: { gt: now } } },
+              tmdbId: { not: null },
+            },
+            select: {
+              tmdbId: true,
+              title: true,
+              genres: true,
+              voteAverage: true,
+              overview: true,
+            },
+          });
+          return movies;
+        },
+      }),
+
       recommend_movies: tool({
         description:
           "Display recommended movies to the user as visual cards. Call this whenever you suggest specific films. Pass the TMDB ids of the movies you are recommending.",
@@ -229,8 +254,10 @@ export const chat = async (req, res, next) => {
           // throwing — forward it so the loop doesn't just end silently.
           console.error("Chat fullStream error part:", part.error);
           res.write(
-            JSON.stringify({ t: "error", v: "The assistant ran into a problem." }) +
-              "\n",
+            JSON.stringify({
+              t: "error",
+              v: "The assistant ran into a problem.",
+            }) + "\n",
           );
         }
       }
@@ -238,8 +265,10 @@ export const chat = async (req, res, next) => {
       console.error("Chat stream error:", streamErr);
       if (!res.writableEnded) {
         res.write(
-          JSON.stringify({ t: "error", v: "The assistant ran into a problem." }) +
-            "\n",
+          JSON.stringify({
+            t: "error",
+            v: "The assistant ran into a problem.",
+          }) + "\n",
         );
       }
     } finally {

@@ -700,3 +700,28 @@ A: The shadcn `Dialog` is Radix-based, so it gives Escape-to-close, backdrop cli
 
 Q: The modal needs cast, which the detail endpoint didn't return. How did you add it without a second round-trip?
 A: TMDB supports `append_to_response=credits` on the movie details request, which nests `credits.cast` in the same response. I widened `getMovieById` to request it and extended the `MovieDetail` type with an optional `credits`. Showtimes reuse the existing `/api/sessions?tmdbId=` endpoint and the same group-by-cinema logic as `ShowtimesPage`, fetched in parallel with the details via `Promise.all`.
+
+## Phase 28 — `get_now_showing` Tool (grounding recommendations)
+
+**What this module does**
+Adds a `get_now_showing` tool to the chat agent that returns the distinct movies currently playing in Christchurch cinemas, read from the scraped `Session` table. It exists so the model can *ground* its recommendations in real, in-theatre data instead of recommending freely from all of TMDB. The tool takes no input and returns `{ tmdbId, title, genres, voteAverage, overview }` per movie. This is the foundation for the "at least one now-showing pick, no made-up movies" feature (`docs/in-theatre-recommendation-user-stories.md`).
+
+**Key design decision — query `Movie`, not `Session`, with a relation filter**
+The naive approach queries `Session` for future rows and de-dupes movies in JS with a `Map`. We instead query the `Movie` table directly with a relation filter — `where: { sessions: { some: { startsAt: { gt: now } } }, tmdbId: { not: null } }` — so Postgres returns one row per movie by construction. Distinctness comes from the schema (Movie is unique per film) rather than app code. `some` is an existential relation filter ("has at least one matching session"); `every`/`none` were wrong here because a film counts as showing if it has *any* upcoming session, regardless of past ones. A `select` projection returns only the five fields the model reasons over.
+
+**One thing I found surprising — display data vs. decision data**
+First instinct was "don't send rating/poster to the tool, the card re-fetches them." But that conflates two kinds of data. `voteAverage` is a *decision input*: when several now-showing films match the genre, rating is how the model breaks the tie — so it must be in the tool payload. `posterUrl` is *display only*: the model never reasons over it, and `recommend_movies` re-fetches it from TMDB. The rule: a tool gets the data it reasons over (genres, overview, rating); the card layer gets the purely visual data (poster). A dropped `voteAverage` (destructured but left out of the stored object) slipped through once — `no-unused-vars` lint would have caught it.
+
+**Interview Q&A**
+
+Q: Why expose now-showing as a tool the model calls, instead of pasting the list into the system prompt?
+A: Three reasons. (1) Tokens — the system prompt is re-sent on every message, so a baked-in list is paid for repeatedly. (2) Freshness — a DB query reflects the latest scrape; a prompt list goes stale the moment the scraper reruns. (3) Agency — the model calls the tool only when it needs it (a recommendation request) and skips it otherwise (e.g. "what did I rate Dune?"). This is grounding: the DB owns the facts, the LLM owns the reasoning.
+
+Q: Walk me through `sessions: { some: { startsAt: { gt: now } } }`. What is `some`, and what would `every`/`none` do?
+A: It's a Prisma relation filter — return a `Movie` that has at least one related `Session` starting in the future. `some` = "there exists a matching related row." `every` would require *all* of a movie's sessions to be in the future, which would wrongly exclude a film that also had past showtimes. `none` would return movies with no future sessions — the opposite set (not showing). `some` is the only correct one for "now showing."
+
+Q: A movie has many showtimes, yet your function has no de-duplication code. How is one row per movie guaranteed?
+A: Because I query the `Movie` table, which is already unique per film, not the `Session` table where a film repeats once per showtime. The relation filter just selects which movies to return; the uniqueness comes from the schema, so there's nothing to de-dup in app code. If I had to dedupe sessions instead, I'd key a `Map` on `tmdbId` and keep the first occurrence.
+
+Q: Why does handing the model this list stop it recommending a film that isn't in theatres?
+A: Without it, the model only has `search_movies` over all of TMDB and no way to know what's actually playing, so any "now showing" claim is a guess. `get_now_showing` gives it the authoritative set from our scraped sessions; combined with a system-prompt rule to pick from that set, its recommendations are constrained to films we can prove are screening.
