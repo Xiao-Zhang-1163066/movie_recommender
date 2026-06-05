@@ -8,6 +8,8 @@ export type ChatMovie = {
   voteAverage: number | null;
   posterUrl: string | null;
   overview: string | null;
+  reason: string;
+  inTheatre: boolean;
 };
 
 export type Message = {

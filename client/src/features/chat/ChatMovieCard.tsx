@@ -14,8 +14,17 @@ export default function ChatMovieCard({
   const { isAuthenticated } = useAuth();
   const { watchlistIds } = useWatchlistIds();
   const { addToWatchlist } = useAddToWatchlist();
-  const { tmdbId, title, posterUrl, voteAverage, overview, releaseYear, runtime } =
-    movie;
+  const {
+    tmdbId,
+    title,
+    posterUrl,
+    voteAverage,
+    overview,
+    releaseYear,
+    runtime,
+    reason,
+    inTheatre,
+  } = movie;
 
   const rating = voteAverage ? voteAverage.toFixed(1) : "N/A";
 
@@ -39,6 +48,15 @@ export default function ChatMovieCard({
             🎬
           </div>
         )}
+        {/* "NOW SHOWING" badge */}
+        {inTheatre && (
+          <div
+            className="absolute top-2 left-2 text-xs font-bold px-1.5 py-0.5 rounded-md"
+            style={{ background: "rgba(0, 183, 255, 0.75)", color: "#fff" }}
+          >
+            NOW SHOWING
+          </div>
+        )}
         <div
           className="absolute top-2 right-2 text-xs font-bold px-1.5 py-0.5 rounded-md"
           style={{ background: "rgba(0,0,0,0.75)", color: "var(--lime)" }}
@@ -57,6 +75,18 @@ export default function ChatMovieCard({
         {[releaseYear, runtime ? `${runtime} min` : null]
           .filter(Boolean)
           .join(" · ")}
+      </p>
+      <p
+        className="mt-1 text-xs"
+        style={{
+          color: "var(--text-2)",
+          display: "-webkit-box",
+          WebkitLineClamp: 3,
+          WebkitBoxOrient: "vertical",
+          overflow: "hidden",
+        }}
+      >
+        {reason}
       </p>
 
       {isAuthenticated ? (

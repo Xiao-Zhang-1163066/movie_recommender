@@ -725,3 +725,56 @@ A: Because I query the `Movie` table, which is already unique per film, not the 
 
 Q: Why does handing the model this list stop it recommending a film that isn't in theatres?
 A: Without it, the model only has `search_movies` over all of TMDB and no way to know what's actually playing, so any "now showing" claim is a guess. `get_now_showing` gives it the authoritative set from our scraped sessions; combined with a system-prompt rule to pick from that set, its recommendations are constrained to films we can prove are screening.
+
+## Phase 29 — In-Theatre Grounding: `reason` + `inTheatre` on cards & prompt policy
+
+**What this module does**
+Extends `recommend_movies` so each card carries a model-written `reason` (why this film fits the request) and a server-computed `inTheatre` flag (is it currently playing in Christchurch). The tool's input changed from a flat `tmdbIds: number[]` to `recommendations: { tmdbId, reason }[]`. A new `SYSTEM_PROMPT` encodes the policy: call `get_now_showing` first, guarantee at least one in-theatre pick, never invent TMDB ids, always supply a per-movie reason, and fall back to an honest "not currently playing" recommendation when nothing showing fits.
+
+**Key design decision — trust boundary: model owns opinions, server owns facts**
+`reason` is model-supplied input because it's a subjective justification only the model has. `inTheatre` is computed server-side from the DB, never trusted from the model — otherwise the model could assert a film is showing when it isn't, which is the exact "made-up" failure the feature exists to prevent. The membership check is batched: one `prisma.movie.findMany` with `tmdbId: { in: [...] }` + the `sessions: { some: { startsAt: { gt: now } } }` relation filter (selecting only `tmdbId`), loaded into a `Set` for O(1) lookups — no N+1, no O(n²) scan in the card loop.
+
+**One thing I found surprising — the schema is a contract the body must match**
+An early version declared `inputSchema` with `tmdbIds` (array) while `execute` destructured `recommendations` with singular `tmdbId`. The model fills exactly the shape the Zod schema declares, so the body read `undefined` and crashed. Two layers must agree: the schema field names and the `execute` destructuring. Same lesson bit twice — a leftover `${id}` in the fetch URL (from the old `tmdbIds.map((id) => ...)`) after switching to `recommendations.map(({ tmdbId }) => ...)` silently fetched `/movie/undefined`.
+
+**Interview Q&A**
+
+Q: You let the model write the `reason` but compute `inTheatre` yourself. Why the split?
+A: Trust boundary. `reason` is a subjective justification only the model knows, so it's model-supplied input. `inTheatre` is a verifiable fact — trusting the model's word lets it claim a film is showing when it isn't (the "made-up" bug). Subjective data comes from the model; verifiable facts are computed server-side from the DB.
+
+Q: The system prompt already says "at least one in-theatre pick," so why also compute `inTheatre` in code?
+A: Defense in depth. A system prompt is a strong nudge, not a guarantee — an LLM obeys it most of the time, not always. The DB computation is the hard enforcement: the badge reflects the database, not the model's claim, so a mislabel can't reach the UI. Prompt asks nicely; code enforces.
+
+Q: How do you flag which recommended ids are in theatres without an N+1 query?
+A: One `findMany` with `tmdbId: { in: [...] }` plus the `sessions: { some: { startsAt: { gt: now } } }` relation filter, selecting only `tmdbId`. That returns the showing subset in a single query; I load it into a `Set` for O(1) `.has()` checks while building each card, instead of querying per movie (N+1) or `.some()`-scanning the array per card (O(n²)).
+
+Q: Why put the recommendation rules in the system prompt rather than hardcoding them?
+A: The prompt is the cheapest, most reversible control surface — behavior changes with no code change or deploy. Tools give the model capability; the prompt gives policy (when and how to use them). Hardcoding would be rigid and fight the model's natural tool-use.
+
+Q: What happens when nothing currently playing matches the user's request?
+A: Rule 5 of the prompt: the bot is honest — it says nothing showing fits and recommends the closest real films flagged as not currently in theatres, rather than forcing an ill-fitting in-theatre pick. The `inTheatre` flag will be `false` on those cards, so the UI won't show a "now showing" badge.
+
+## Phase 30 — Frontend: reason line + "Now showing" badge on chat cards
+
+**What this module does**
+Surfaces the two new backend fields on the chat movie card. `ChatMovie` (the shared backend↔frontend contract in `features/chat/types.ts`) gains `reason: string` and `inTheatre: boolean`. `ChatMovieCard.tsx` renders the `reason` as a quiet, 3-line-clamped sentence under the title/meta, and renders a "NOW SHOWING" pill over the poster (top-left, clear of the top-right `★` rating) only when `inTheatre` is true. This makes the whole in-theatre grounding feature visible end-to-end.
+
+**Key design decision — type-first, and where truth lives**
+Updated the type before the component so the TypeScript compiler flags every site that needs the new fields (compiler-driven refactoring). The "now showing" fact is enforced once, in the tool's `execute` (DB query), and merely transported through the stream and rendered by the card — the UI never decides truth, it only displays the flag handed to it.
+
+**One thing I found surprising — required fields added with no type error**
+Adding two *required* fields to `ChatMovie` broke nothing, because `useChat` casts the parsed stream as `event.v as ChatMovie[]`. A type assertion bypasses structural checking, so TS trusts the shape without verifying it. The upside is no churn; the hidden risk is that if the backend ever drops a field, the compiler stays silent and the value is `undefined` at runtime. The real fix would be a runtime validator (e.g. Zod) on each parsed NDJSON line.
+
+**Interview Q&A**
+
+Q: Why edit `types.ts` before the component?
+A: The type is the contract — TS won't let me read `movie.reason` until it's declared, and updating the type first makes the compiler point at every call site that needs changing. Type-first is compiler-driven refactoring.
+
+Q: You added two required fields to `ChatMovie`, yet nothing broke. Why, and what's the hidden risk?
+A: `useChat` casts the stream with `as ChatMovie[]`, and a type assertion skips structural checking — TS trusts it without validating. So no compile error, but if the backend ever stops sending a field, TS stays silent and I get `undefined` at runtime. The assertion is an unchecked trust boundary; a runtime validator on the stream would close it.
+
+Q: Why `&&` conditional for the badge but unconditional for the reason, and when does `&&` bite?
+A: The badge should appear only when `inTheatre` is true, so short-circuit rendering fits. The reason is always present, so it's rendered unconditionally (a guard is still safer). `&&` bites when the left operand is a falsy number — `{0 && <X/>}` renders a literal `0` — but `inTheatre` is a boolean, so it's safe.
+
+Q: "Now showing" travels model → tool → stream → card. Where is that fact enforced?
+A: In the tool's `execute`, via the DB query — not the model, not the card. The card only renders the flag it receives. Truth is enforced at the boundary closest to the data; everything downstream just transports it.

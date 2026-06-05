@@ -24,8 +24,8 @@ AI-powered cinema companion for Christchurch film-goers.
 ### Backend (`/.env`)
 
 ```
-DATABASE_URL="postgresql://sean@localhost:5432/movie_recommender"
-DIRECT_URL="postgresql://sean@localhost:5432/movie_recommender"
+DATABASE_URL="postgresql://username@localhost:5432/movie_recommender"
+DIRECT_URL="postgresql://username@localhost:5432/movie_recommender"
 JWT_SECRET="your_jwt_secret"
 JWT_EXPIRES_IN="30d"
 NODE_ENV="development"
@@ -35,7 +35,7 @@ GEMINI_API_KEY="your_gemini_key"
 ### Scraper (`/scraper/.env`)
 
 ```
-DATABASE_URL="postgresql://sean@localhost:5432/movie_recommender"
+DATABASE_URL="postgresql://username@localhost:5432/movie_recommender"
 TMDB_API_KEY="your_tmdb_key"
 ```
 

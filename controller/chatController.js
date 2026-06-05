@@ -15,9 +15,25 @@ const groq = createGroq({
 
 const TMDB_IMG_BASE = "https://image.tmdb.org/t/p/w500";
 
-const SYSTEM_PROMPT = `You are AI Movie Mate, a concierge that recommends films showing in Christchurch, New Zealand.
+const SYSTEM_PROMPT = `You are AI Movie Mate, a concierge that recommends films to users in 
+  Christchurch, New Zealand.
 
-When you suggest specific movies to the user, you MUST call the recommend_movies tool with their TMDB ids so they render as visual cards. Do not describe posters or ratings in prose — the card shows those. Keep your text reply short and conversational (a sentence or two framing the picks). Use search_movies to find ids and get_movie_details when you need runtime or genres before recommending.`;
+  How to recommend:
+  1. Before recommending, call get_now_showing to see which films are currently playing in 
+  Christchurch cinemas.
+  2. At least one of your recommendations MUST come from that now-showing list. You may also 
+  suggest other relevant films that are not currently playing.
+  3. Never invent TMDB ids. Every id must come from get_now_showing or search_movies — real 
+  movies only. Use get_movie_details if you need runtime or genres before deciding.
+  4. When you suggest specific films you MUST call recommend_movies, passing each film's TMDB 
+  id and a one-sentence reason it fits what the user asked for. The reason is shown on the 
+  card.
+  5. If nothing currently playing fits the request, say so honestly and recommend the closest 
+  real films as options that aren't in theatres right now — do not force an ill-fitting 
+  in-theatre pick.
+
+  Keep your text reply short and conversational (a sentence or two framing the picks). Do not 
+  describe posters or ratings in prose — the card shows those.`;
 
 /**
  * POST /chat
@@ -187,17 +203,36 @@ export const chat = async (req, res, next) => {
 
       recommend_movies: tool({
         description:
-          "Display recommended movies to the user as visual cards. Call this whenever you suggest specific films. Pass the TMDB ids of the movies you are recommending.",
+          "Display recommended movies to the user as visual cards. Call this whenever you suggest specific films. For each movie pass its TMDB id and a short reason it fits the user's request — the reason is shown on the card.",
         inputSchema: z.object({
-          tmdbIds: z.array(z.number()),
+          recommendations: z.array(
+            z.object({
+              tmdbId: z.number(),
+              reason: z
+                .string()
+                .describe(
+                  "One short sentence on why this movie fits what the user asked for",
+                ),
+            }),
+          ),
         }),
-        execute: async ({ tmdbIds }) => {
+        execute: async ({ recommendations }) => {
           // Enrich each id into a card payload from TMDB so poster / rating /
           // runtime are always accurate (never invented by the model).
+          const now = new Date();
+          const tmdbIds = recommendations.map((r) => r.tmdbId);
+          const inTheatreMovies = await prisma.movie.findMany({
+            where: {
+              tmdbId: { in: tmdbIds },
+              sessions: { some: { startsAt: { gt: now } } },
+            },
+            select: { tmdbId: true },
+          });
+          const inTheatreIds = new Set(inTheatreMovies.map((m) => m.tmdbId));
           const cards = await Promise.all(
-            tmdbIds.map(async (id) => {
+            recommendations.map(async ({ tmdbId, reason }) => {
               const data = await fetch(
-                `https://api.themoviedb.org/3/movie/${id}?api_key=${process.env.TMDB_API_KEY}`,
+                `https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${process.env.TMDB_API_KEY}`,
               ).then((r) => r.json());
               return {
                 tmdbId: data.id,
@@ -211,6 +246,8 @@ export const chat = async (req, res, next) => {
                   ? `${TMDB_IMG_BASE}${data.poster_path}`
                   : null,
                 overview: data.overview ?? null,
+                reason: reason,
+                inTheatre: inTheatreIds.has(tmdbId),
               };
             }),
           );
