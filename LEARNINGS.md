@@ -778,3 +778,25 @@ A: The badge should appear only when `inTheatre` is true, so short-circuit rende
 
 Q: "Now showing" travels model → tool → stream → card. Where is that fact enforced?
 A: In the tool's `execute`, via the DB query — not the model, not the card. The card only renders the flag it receives. Truth is enforced at the boundary closest to the data; everything downstream just transports it.
+
+## Phase 31 — Typing Indicator
+
+**What this module does**
+Adds a visible loading state to the chat thread. `MessageList` gains an `isLoading: boolean` prop (threaded down from `useChat` via `ChatPage`). When `isLoading` is true but no streaming content has arrived yet, an animated `DotStream` spinner renders inside an assistant-style bubble — same `var(--surface-2)` background and border-radius as a real message. The moment the first text delta or movie card arrives, the spinner vanishes and the real content takes its place.
+
+**Key design decision — three-part condition**
+The indicator renders only when `isLoading && !streamingText && streamingMovies.length === 0`. `isLoading` stays `true` for the entire request lifecycle (including while text is streaming), so without the second and third checks the spinner would overlap real content. Together they express a precise state: "request is in flight but nothing has been received yet."
+
+**One thing I found surprising — `isLoading` is true while text streams**
+It's tempting to think `isLoading` means "waiting." In this hook it means "request is active" — it stays `true` until the `finally` block after the stream fully ends. So the condition for the spinner is not just `isLoading`; it requires knowing that no content has arrived yet.
+
+**Interview Q&A**
+
+Q: Why not call `useChat()` directly inside `MessageList` to read `isLoading`?
+A: Calling a hook creates a new, independent instance of all its state. A second `useChat()` in `MessageList` would have its own `isLoading`, disconnected from the one in `ChatPage` — they'd never be in sync. The fix is lifting state up: own it in one place and pass it down as a prop.
+
+Q: The spinner disappears as soon as streaming text arrives. What pattern is this?
+A: Placeholder swap (also called loading skeleton). Show a placeholder while waiting; replace it with real content the moment it arrives. The two states are mutually exclusive — you never show both. It's the same pattern as YouTube's grey thumbnail boxes or Slack's message shimmer.
+
+Q: Why does the three-part condition matter — why not just `isLoading`?
+A: `isLoading` is true for the entire request, including while content is streaming. Without `!streamingText && streamingMovies.length === 0`, the spinner would render alongside real content. The three checks together express a single precise state: "the request is active but nothing has been received yet."

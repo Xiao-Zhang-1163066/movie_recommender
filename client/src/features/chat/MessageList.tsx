@@ -5,6 +5,8 @@ import type { Components } from "react-markdown";
 import type { ChatMovie, Message } from "./types";
 import ChatMovieCard from "./ChatMovieCard";
 import MovieDetailModal from "./MovieDetailModal";
+import { DotStream } from "ldrs/react";
+import "ldrs/react/DotStream.css";
 
 // Tailwind's preflight strips default list/margin styling, so map the elements
 // the model actually emits back to sensible spacing.
@@ -59,10 +61,12 @@ function MessageList({
   messages,
   streamingText,
   streamingMovies,
+  isLoading,
 }: {
   messages: Message[];
   streamingText: string;
   streamingMovies: ChatMovie[];
+  isLoading: boolean;
 }) {
   const [openTmdbId, setOpenTmdbId] = useState<number | null>(null);
 
@@ -87,7 +91,9 @@ function MessageList({
           <div
             key={i}
             className={`flex flex-col ${
-              m.role === "user" ? "self-end items-end" : "self-start items-start"
+              m.role === "user"
+                ? "self-end items-end"
+                : "self-start items-start"
             }`}
             style={{ maxWidth: m.movies?.length ? "100%" : "80%" }}
           >
@@ -114,8 +120,24 @@ function MessageList({
           </div>
         ))}
 
+        {isLoading && !streamingText && streamingMovies.length === 0 && (
+          <div
+            className="self-start px-4 py-3 text-sm leading-relaxed"
+            style={{
+              borderRadius: "14px",
+              background: "var(--surface-2)",
+              // color: "var(--text-2)",
+            }}
+          >
+            <DotStream size="60" speed="2.5" color="#c6f432" />
+          </div>
+        )}
+
         {(streamingText || streamingMovies.length > 0) && (
-          <div className="self-start flex flex-col items-start" style={{ maxWidth: "100%" }}>
+          <div
+            className="self-start flex flex-col items-start"
+            style={{ maxWidth: "100%" }}
+          >
             {streamingText && (
               <div
                 className="px-4 py-3 text-sm leading-relaxed"
