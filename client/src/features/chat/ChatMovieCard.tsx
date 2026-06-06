@@ -52,7 +52,7 @@ export default function ChatMovieCard({
         {inTheatre && (
           <div
             className="absolute top-2 left-2 text-xs font-bold px-1.5 py-0.5 rounded-md"
-            style={{ background: "rgba(0, 183, 255, 0.75)", color: "#fff" }}
+            style={{ background: "#c6f432", color: "#121212" }}
           >
             NOW SHOWING
           </div>
