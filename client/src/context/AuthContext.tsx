@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState } from "react";
+import { getMe, logout as logoutService } from "@/services/authService";
 type AuthContextType = {
   isAuthenticated: boolean;
   isLoading: boolean;
@@ -9,19 +10,13 @@ const AuthContext = createContext<AuthContextType | null>(null);
 function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+
+  // On mount, check if user is authenticated
   useEffect(() => {
-    // step 1: on mount, make a GET request to /api/auth/me with credentials: "include"
     const checkAuth = async () => {
       try {
-        const response = await fetch("/api/auth/me", {
-          method: "GET",
-          credentials: "include",
-        });
-        if (response.ok) {
-          setIsAuthenticated(true);
-        } else {
-          setIsAuthenticated(false);
-        }
+        const res = await getMe();
+        setIsAuthenticated(res);
       } catch (error) {
         console.error("Error checking auth:", error);
         setIsAuthenticated(false);
@@ -31,17 +26,15 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
     };
     checkAuth();
   }, []);
+
   function login() {
     setIsAuthenticated(true);
   }
+
   async function logout() {
-    const response = await fetch("/api/auth/logout", {
-      method: "POST",
-      credentials: "include",
-    });
-    if (response.ok) {
-      setIsAuthenticated(false);
-    } else {
+    const res = await logoutService();
+    setIsAuthenticated(false);
+    if (!res) {
       console.error("Logout failed");
     }
   }
@@ -67,5 +60,5 @@ function useAuth() {
   }
   return context;
 }
-
+// eslint-disable-next-line react-refresh/only-export-components
 export { AuthProvider, useAuth };

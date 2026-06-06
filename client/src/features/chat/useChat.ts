@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { ChatMovie, Message, StreamEvent } from "./types";
+import { postChatMessage } from "@/services/chatService";
 
 export function useChat() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -20,18 +21,10 @@ export function useChat() {
     let assistantMovies: ChatMovie[] = [];
 
     try {
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        // Send only role + content — the model doesn't need our rendered cards.
-        body: JSON.stringify({
-          messages: updatedMessages.map(({ role, content }) => ({
-            role,
-            content,
-          })),
-        }),
-      });
+      // Send only role + content — the model doesn't need our rendered cards.
+      const response = await postChatMessage(
+        updatedMessages.map(({ role, content }) => ({ role, content })),
+      );
 
       if (!response.ok || !response.body) {
         throw new Error("Network response was not ok");

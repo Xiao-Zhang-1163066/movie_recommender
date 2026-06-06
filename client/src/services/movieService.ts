@@ -1,7 +1,8 @@
+import { API_BASE } from "@/lib/config";
 import type { InTheaterMovie, WatchlistPayload } from "@/features/movies/types";
 
 export async function getInTheaterMovies(): Promise<InTheaterMovie[]> {
-  const res = await fetch("/api/movies?inTheaters=true", {
+  const res = await fetch(`${API_BASE}/api/movies?inTheaters=true`, {
     method: "GET",
     credentials: "include",
   });
@@ -13,7 +14,7 @@ export async function getInTheaterMovies(): Promise<InTheaterMovie[]> {
 }
 
 export async function addToWatchlist(movie: WatchlistPayload): Promise<void> {
-  const res = await fetch("/api/watchlist", {
+  const res = await fetch(`${API_BASE}/api/watchlist`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",

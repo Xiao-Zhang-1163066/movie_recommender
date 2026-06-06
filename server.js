@@ -30,12 +30,12 @@ app.use(
 );
 
 // api routes
-app.use("/auth", authRoutes);
-app.use("/movies", movieRoutes);
-app.use("/watchlist", watchlistRoutes);
-app.use("/cinemas", cinemaRoutes);
-app.use("/sessions", sessionRoutes);
-app.use("/chat", chatRoutes);
+app.use("/api/auth", authRoutes);
+app.use("/api/movies", movieRoutes);
+app.use("/api/watchlist", watchlistRoutes);
+app.use("/api/cinemas", cinemaRoutes);
+app.use("/api/sessions", sessionRoutes);
+app.use("/api/chat", chatRoutes);
 
 const port = process.env.PORT || 3000;
 

@@ -1,18 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import DatePicker from "@/components/DatePicker";
-
-type Session = {
-  id: string;
-  startsAt: string;
-  bookingUrl: string | null;
-  cinema: {
-    id: string;
-    name: string;
-    slug: string;
-    suburb: string;
-  };
-};
+import { getSessions, type Session } from "@/services/sessionService";
 
 type GroupedCinema = {
   cinema: Session["cinema"];
@@ -28,19 +17,10 @@ function ShowtimesPage() {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    if (!id) return;
     const fetchSessions = async () => {
       try {
-        const response = await fetch(
-          `/api/sessions?tmdbId=${id}&date=${selectedDate}`,
-          { method: "GET", credentials: "include" },
-        );
-        if (!response.ok) {
-          setIsLoading(false);
-          return;
-        }
-        const data = await response.json();
-        const sessions: Session[] = data.data.sessions;
-
+        const sessions = await getSessions(id, selectedDate);
         const groupedResult: Record<string, GroupedCinema> = {};
         sessions.forEach((session) => {
           const cinemaId = session.cinema.id;
@@ -59,11 +39,10 @@ function ShowtimesPage() {
             bookingUrl: session.bookingUrl,
           });
         });
-
         setGrouped(groupedResult);
-        setIsLoading(false);
       } catch (error) {
         console.error("Error fetching sessions:", error);
+      } finally {
         setIsLoading(false);
       }
     };

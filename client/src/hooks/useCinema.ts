@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { getCinema } from "@/services/cinemaService";
 import type { Cinema } from "@/features/cinemas/types";
 
 function useCinema(slug: string) {
@@ -8,14 +9,8 @@ function useCinema(slug: string) {
   useEffect(() => {
     async function fetchCinema() {
       try {
-        const response = await fetch(`/api/cinemas/${slug}`);
-        if (!response.ok) {
-          const body = await response.json();
-          setError(body.message ?? "Failed to fetch cinema");
-          return;
-        }
-        const data = await response.json();
-        setCinema(data.data.cinema);
+        const data = await getCinema(slug);
+        setCinema(data);
       } catch (err) {
         setError(
           err instanceof Error ? err.message : "Failed to fetch cinema",

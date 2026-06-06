@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getMovieById, IMG_URL, type MovieDetail } from "@/api/tmdb";
+import { getSessions, type Session } from "@/services/sessionService";
 import {
   Dialog,
   DialogContent,
@@ -8,13 +9,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-
-type Session = {
-  id: string;
-  startsAt: string;
-  bookingUrl: string | null;
-  cinema: { id: string; name: string; slug: string; suburb: string };
-};
 
 type GroupedCinema = {
   cinema: Session["cinema"];
@@ -40,20 +34,14 @@ export default function MovieDetailModal({
     const load = async () => {
       setIsLoading(true);
       try {
-        const [detail, sessionsRes] = await Promise.all([
+        const [detail, sessions] = await Promise.all([
           getMovieById(String(tmdbId)),
-          fetch(`/api/sessions?tmdbId=${tmdbId}&date=${today}`, {
-            method: "GET",
-            credentials: "include",
-          }),
+          getSessions(tmdbId, today),
         ]);
 
         // Group today's sessions by cinema (same shape as ShowtimesPage).
         const byCinema: Record<string, GroupedCinema> = {};
-        if (sessionsRes.ok) {
-          const data = await sessionsRes.json();
-          const sessions: Session[] = data.data.sessions;
-          sessions.forEach((s) => {
+        sessions.forEach((s) => {
             const time = new Date(s.startsAt).toLocaleTimeString("en-NZ", {
               timeZone: "Pacific/Auckland",
               hour: "2-digit",
@@ -68,7 +56,6 @@ export default function MovieDetailModal({
               bookingUrl: s.bookingUrl,
             });
           });
-        }
 
         if (!active) return;
         setMovie(detail);

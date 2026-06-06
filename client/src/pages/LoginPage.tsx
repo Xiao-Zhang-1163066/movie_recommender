@@ -1,6 +1,7 @@
 import { useAuth } from "@/context/AuthContext";
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
+import { login as loginApi } from "@/services/authService";
 
 function LoginPage() {
   const navigate = useNavigate();
@@ -12,18 +13,12 @@ function LoginPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
-    const response = await fetch("/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
-      credentials: "include",
-    });
-    if (!response.ok) {
-      const data = await response.json();
-      setError(data.error || "Login failed");
-    } else {
-      login();
-      navigate("/movies");
+    try {
+      await loginApi(email, password);
+      login(); // update auth context
+      navigate("/");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Login failed");
     }
   }
 
@@ -52,9 +47,7 @@ function LoginPage() {
           </p>
         </div>
 
-        {error && (
-          <p className="text-sm text-destructive">{error}</p>
-        )}
+        {error && <p className="text-sm text-destructive">{error}</p>}
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
           <input
@@ -94,7 +87,11 @@ function LoginPage() {
 
         <p className="text-sm text-center" style={{ color: "var(--text-2)" }}>
           Don't have an account?{" "}
-          <Link to="/register" className="font-semibold" style={{ color: "var(--lime)" }}>
+          <Link
+            to="/register"
+            className="font-semibold"
+            style={{ color: "var(--lime)" }}
+          >
             Register
           </Link>
         </p>
