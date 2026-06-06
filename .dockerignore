@@ -1,0 +1,9 @@
+node_modules/
+.env
+generated/
+client/
+docs/
+.claude/
+CLAUDE.md
+LEARNINGS.md
+scraper/

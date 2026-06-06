@@ -21,10 +21,10 @@ app.use(express.json());
 // Middleware to parse cookies
 app.use(cookieParser());
 
-// CORS middleware (for development, adjust as needed for production)
+// CORS middleware
 app.use(
   cors({
-    origin: "http://localhost:5173", // Adjust this to your frontend URL
+    origin: process.env.CORS_ORIGIN || "http://localhost:5173",
     credentials: true, // Allow cookies to be sent with requests
   }),
 );
@@ -37,7 +37,7 @@ app.use("/cinemas", cinemaRoutes);
 app.use("/sessions", sessionRoutes);
 app.use("/chat", chatRoutes);
 
-const port = 3000;
+const port = process.env.PORT || 3000;
 
 app.get("/", (req, res) => {
   res.send("Hello World!???");
