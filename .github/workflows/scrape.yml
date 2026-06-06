@@ -1,0 +1,29 @@
+name: Scrape Cinema Sessions
+
+on:
+  schedule:
+    - cron: 0 18 * * * # daily at 6am NZ time (UTC)
+  workflow_dispatch:
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        working-directory: scraper
+        run: pip install -r requirements.txt
+
+      - name: Run scraper
+        working-directory: scraper
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TMDB_API_KEY: ${{ secrets.VITE_TMDB_API_KEY }}
+        run: python run.py

@@ -52,3 +52,25 @@ A: A static web app is a CDN serving pre-built HTML, CSS, and JS files — there
 
 Q: Why does `navigationFallback` exist in `staticwebapp.config.json`?
 A: A static file host serves files by path. If someone navigates directly to `/movies`, the host looks for a `movies.html` file — which doesn't exist — and returns a 404. React Router only works client-side after `index.html` loads. `navigationFallback` tells SWA to serve `index.html` for any unmatched path, letting React Router take over and render the correct page.
+
+## Phase 34 — Backend CI/CD with GitHub Actions
+
+**What this module does**
+Automates backend deployment via a GitHub Actions workflow. On every push to `main` that changes a backend file, the workflow builds a new `linux/amd64` Docker image, pushes it to Azure Container Registry, then runs `az containerapp update` to deploy the new image to the Container App. A `workflow_dispatch:` trigger allows manual runs from the GitHub UI without needing a code change.
+
+**Key design decision**
+The workflow uses `paths:` filtering to only run when backend files change — pushing a frontend change won't waste 5 minutes rebuilding a Docker image. But `paths:` creates a blind spot: changes to the workflow YAML file itself don't match the filter and never trigger a run. `workflow_dispatch:` solves this by adding a manual trigger as an escape hatch for testing the pipeline or forcing a redeploy.
+
+**One thing I found surprising**
+GitHub Actions runners are fresh VMs with no Docker layer cache. Every run re-downloads all npm packages and rebuilds every layer from scratch, even if nothing changed. Locally, Docker reuses cached layers and the build is near-instant. The fix is `cache-from`/`cache-to` in `docker/build-push-action`, which stores layer cache in the container registry between CI runs — but this adds complexity and isn't needed until build times become painful.
+
+**Interview Q&A**
+
+Q: How does your backend get deployed when you push code?
+A: A GitHub Actions workflow watches for pushes to `main` that touch backend files. When triggered, it builds a new Docker image for `linux/amd64`, pushes it to Azure Container Registry, then calls `az containerapp update` to point the Container App at the new image. Azure creates a new revision and gradually shifts traffic to it with zero downtime.
+
+Q: What is a service principal and why does the CI pipeline need one?
+A: A service principal is a machine identity in Azure — like a user account but for automated systems. The GitHub Actions runner needs permission to call `az containerapp update`, which requires authenticating to Azure. A service principal with contributor role on the resource group gives the runner exactly the permissions it needs, without using a personal account's credentials.
+
+Q: Why does building the Docker image in CI take longer than locally?
+A: GitHub Actions runners are fresh VMs spun up from scratch for every run — no cached Docker layers. Every `RUN npm ci` re-downloads packages from the internet. Locally, Docker caches each layer after the first build, so unchanged layers are skipped entirely. The solution is to store the layer cache in the container registry using `cache-from`/`cache-to` in the build action.
