@@ -4,7 +4,7 @@ import { z } from "zod";
 import { prisma } from "../config/db.js";
 import { createGroq } from "@ai-sdk/groq";
 
-// Step 1: create the Gemini provider using GEMINI_API_KEY from process.env
+// Step 1: create the AI provider
 // const google = createGoogleGenerativeAI({
 //   apiKey: process.env.GEMINI_API_KEY,
 // });
