@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { updateWatchlistItem } from "@/services/watchlistService";
 import toast from "react-hot-toast";
-import type { WatchlistItem, WatchlistStatus } from "./types";
+import type { WatchlistStatus } from "./types";
 
 export function useWatchlistMutations() {
   const queryClient = useQueryClient();
