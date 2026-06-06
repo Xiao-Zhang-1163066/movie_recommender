@@ -44,8 +44,6 @@ export async function register(
 }
 
 export async function logout(): Promise<boolean> {
-  // POST /api/auth/logout with credentials: "include"
-  // return response.ok
   const res = await fetch(`${API_BASE}/api/auth/logout`, {
     method: "POST",
     credentials: "include",
