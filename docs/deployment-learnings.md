@@ -74,3 +74,22 @@ A: A service principal is a machine identity in Azure — like a user account bu
 
 Q: Why does building the Docker image in CI take longer than locally?
 A: GitHub Actions runners are fresh VMs spun up from scratch for every run — no cached Docker layers. Every `RUN npm ci` re-downloads packages from the internet. Locally, Docker caches each layer after the first build, so unchanged layers are skipped entirely. The solution is to store the layer cache in the container registry using `cache-from`/`cache-to` in the build action.
+
+## Phase 35 — Scraper Cron via GitHub Actions
+
+**What this module does**
+A GitHub Actions workflow runs the Python scraper on a daily cron schedule (6am NZ time). On each run, GitHub spins up a fresh Ubuntu VM, checks out the repo, installs Python dependencies, then runs `python run.py` — which scrapes cinema websites, enriches sessions with TMDB movie data, and writes the results to Neon Postgres. The VM is destroyed after the run completes.
+
+**Key design decision**
+Cinemas are seeded once into the production database as a one-off operation (`seed_cinemas.py` run locally against the Neon URL). Sessions are refreshed daily by the cron. This separation makes sense because cinema metadata is static — it never changes — while session schedules update daily. Re-seeding cinemas on every cron run would be wasteful and fragile.
+
+**One thing I found surprising**
+The GitHub Actions runner has no state between runs — it's a brand new VM every time. That means `pip install` runs from scratch on every cron trigger. It also means secrets must be injected via GitHub Secrets as environment variables; the runner has no access to your local `.env` file. The secret name in GitHub and the env var name the script reads can differ — the workflow maps one to the other in the `env:` block.
+
+**Interview Q&A**
+
+Q: How does your app keep its cinema session data fresh?
+A: A Python scraper runs as a GitHub Actions cron job every day at 6am NZ time. It scrapes cinema websites, enriches the session data with TMDB movie details, and writes the results to our Neon Postgres database using a replace-on-refresh pattern — deleting all future sessions for each cinema before re-inserting the current schedule. The Express API then serves that fresh data to the frontend.
+
+Q: What happens to the GitHub Actions runner after the scraper finishes?
+A: The runner VM is destroyed completely — no files, installed packages, or state persists between runs. Every cron trigger starts from a blank machine. This is why pip install runs every time and why secrets must be stored in GitHub Secrets rather than relying on any local environment.

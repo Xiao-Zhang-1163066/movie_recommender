@@ -109,7 +109,7 @@ function MovieDetailPage() {
 
         {/* CTA */}
         <button
-          onClick={() => navigate(`/movies/${id}/cinemas`)}
+          onClick={() => navigate(`/movie/${id}/cinemas`)}
           className="self-start px-8 py-4 rounded-full font-bold text-sm transition-opacity hover:opacity-85"
           style={{ background: "var(--lime)", color: "#000" }}
         >
