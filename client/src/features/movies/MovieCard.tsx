@@ -16,7 +16,7 @@ export default function MovieCard({ movie }: { movie: MovieCardData }) {
   return (
     <div
       className="cursor-pointer group"
-      onClick={() => navigate(`/movies/${tmdbId}`)}
+      onClick={() => navigate(`/movie/${tmdbId}`)}
     >
       <div
         className="relative overflow-hidden"

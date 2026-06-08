@@ -9,6 +9,7 @@ import ChatPage from "./pages/ChatPage";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
 import PageNotFound from "./pages/PageNotFound";
+import SearchPage from "./pages/SearchPage";
 import { AuthProvider } from "./context/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 import WatchlistPage from "./pages/WatchListPage";
@@ -21,8 +22,9 @@ function App() {
           <Route element={<Layout />}>
             <Route index element={<Navigate replace to="/movies" />} />
             <Route path="/movies" element={<MoviesPage />} />
-            <Route path="/movies/:id" element={<MovieDetailPage />} />
-            <Route path="/movies/:id/cinemas" element={<ShowtimesPage />} />
+            <Route path="/search" element={<SearchPage />} />
+            <Route path="/movie/:id" element={<MovieDetailPage />} />
+            <Route path="/movie/:id/cinemas" element={<ShowtimesPage />} />
             <Route path="/cinemas" element={<CinemasPage />} />
             <Route path="/cinemas/:slug" element={<CinemaDetailPage />} />
             <Route element={<ProtectedRoute />}>

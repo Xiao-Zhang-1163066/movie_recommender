@@ -1,4 +1,5 @@
 import { useAuth } from "@/context/AuthContext";
+import SearchBar from "@/features/search/SearchBar";
 import { Link, Outlet, useLocation } from "react-router-dom";
 
 const navLinks = [
@@ -49,6 +50,7 @@ const Layout = () => {
         </div>
 
         <div className="flex items-center gap-3 shrink-0">
+          <SearchBar />
           {isAuthenticated ? (
             <button
               onClick={logout}
