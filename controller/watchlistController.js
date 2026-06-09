@@ -25,6 +25,7 @@ const addToWatchlist = async (req, res) => {
     posterUrl,
     overview,
     releaseYear,
+    voteAverage,
     status,
     rating,
     notes,
@@ -42,8 +43,14 @@ const addToWatchlist = async (req, res) => {
         posterUrl,
         overview,
         releaseYear,
+        voteAverage,
         createdBy: req.user.id,
       },
+    });
+  } else if (movie.voteAverage == null && voteAverage != null) {
+    movie = await prisma.movie.update({
+      where: { id: movie.id },
+      data: { voteAverage },
     });
   }
   try {

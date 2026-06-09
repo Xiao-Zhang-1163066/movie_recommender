@@ -10,7 +10,7 @@ export async function getWatchlist(): Promise<WatchlistItem[]> {
 
 export async function updateWatchlistItem(
   id: string,
-  body: { status?: WatchlistStatus; rating?: number },
+  body: { status?: WatchlistStatus; rating?: number | null; notes?: string | null },
 ): Promise<void> {
   const res = await fetch(`${API_BASE}/api/watchlist/${id}`, {
     method: "PUT",

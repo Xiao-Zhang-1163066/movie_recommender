@@ -14,6 +14,7 @@ export type WatchlistPayload = {
   posterUrl: string | null;
   overview: string | null;
   releaseYear: number | null;
+  voteAverage?: number | null;
 };
 
 export type MovieCardData = {

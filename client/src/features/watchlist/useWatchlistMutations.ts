@@ -37,6 +37,25 @@ export function useWatchlistMutations() {
       onError: () => toast.error("Failed to update status"),
     });
 
+  const { mutate: editItem, isPending: isEditing } = useMutation({
+    mutationFn: ({
+      itemId,
+      status,
+      rating,
+      notes,
+    }: {
+      itemId: string;
+      status: WatchlistStatus;
+      rating: number | null;
+      notes: string | null;
+    }) => updateWatchlistItem(itemId, { status, rating, notes }),
+    onSuccess: () => {
+      toast.success("Updated");
+      queryClient.invalidateQueries({ queryKey: ["watchlistItems"] });
+    },
+    onError: () => toast.error("Failed to update"),
+  });
+
   return {
     handleRating: (itemId: string, rating: number) =>
       handleRating({ itemId, rating }),
@@ -45,7 +64,12 @@ export function useWatchlistMutations() {
       newStatus: WatchlistStatus,
       rating?: number,
     ) => handleStatusChange({ itemId, newStatus, rating }),
+    handleEdit: (
+      itemId: string,
+      data: { status: WatchlistStatus; rating: number | null; notes: string | null },
+    ) => editItem({ itemId, ...data }),
     isRating,
     isStatusChanging,
+    isEditing,
   };
 }

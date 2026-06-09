@@ -4,14 +4,29 @@ import type { MovieCardData } from "./types";
 import { useWatchlistIds } from "./useWatchlistIds";
 import WatchlistButton from "./WatchlistButton";
 import { useAddToWatchlist } from "./useAddToWatchlist";
+
 export default function MovieCard({ movie }: { movie: MovieCardData }) {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
-  const { watchlistIds } = useWatchlistIds();
-  const { addToWatchlist } = useAddToWatchlist();
-  const { tmdbId, title, posterUrl, voteAverage, overview, releaseYear } =
-    movie;
+  const { watchlistIds, watchlistIdMap } = useWatchlistIds();
+  const { addToWatchlist, removeFromWatchlist } = useAddToWatchlist();
+  const { tmdbId, title, posterUrl, voteAverage, overview, releaseYear } = movie;
   const rating = voteAverage ? voteAverage.toFixed(1) : "N/A";
+  const inList = watchlistIds.has(tmdbId);
+
+  function handleWatchlistClick(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!isAuthenticated) {
+      navigate("/login");
+      return;
+    }
+    if (inList) {
+      const itemId = watchlistIdMap.get(tmdbId);
+      if (itemId) removeFromWatchlist(itemId);
+    } else {
+      addToWatchlist({ tmdbId, title, posterUrl, overview, releaseYear, voteAverage });
+    }
+  }
 
   return (
     <div
@@ -49,21 +64,12 @@ export default function MovieCard({ movie }: { movie: MovieCardData }) {
       >
         {title}
       </p>
-      {isAuthenticated ? (
-        <WatchlistButton
-          inList={watchlistIds.has(tmdbId)}
-          onClick={(e) => {
-            e.stopPropagation();
-            addToWatchlist({
-              tmdbId: tmdbId,
-              title: title,
-              posterUrl: posterUrl,
-              overview: overview,
-              releaseYear: releaseYear,
-            });
-          }}
-        />
-      ) : null}
+      <WatchlistButton
+        inList={inList}
+        onClick={handleWatchlistClick}
+        size="xs"
+        className="mt-2 w-full"
+      />
     </div>
   );
 }

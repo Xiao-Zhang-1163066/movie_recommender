@@ -1,26 +1,19 @@
-export default function WatchlistButton({
-  inList,
-  onClick,
-}: {
+import { Button, type buttonVariants } from "@/components/ui/button";
+import type { VariantProps } from "class-variance-authority";
+import type { ComponentProps } from "react";
+
+type ButtonProps = Omit<ComponentProps<typeof Button>, "variant" | "onClick"> &
+  VariantProps<typeof buttonVariants>;
+
+type Props = ButtonProps & {
   inList: boolean;
   onClick: (e: React.MouseEvent) => void;
-}) {
+};
+
+export default function WatchlistButton({ inList, onClick, ...props }: Props) {
   return (
-    <button
-      onClick={onClick}
-      disabled={inList}
-      className="mt-2 w-full py-1.5 text-xs font-bold rounded-full transition-opacity"
-      style={
-        inList
-          ? {
-              background: "var(--chip-bg)",
-              color: "var(--text-2)",
-              cursor: "not-allowed",
-            }
-          : { background: "var(--lime)", color: "#000" }
-      }
-    >
-      {inList ? "In Watchlist" : "+ Watchlist"}
-    </button>
+    <Button variant={inList ? "muted" : "lime"} onClick={onClick} {...props}>
+      {inList ? "✓ In Watchlist" : "+ Watchlist"}
+    </Button>
   );
 }

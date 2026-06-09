@@ -6,6 +6,7 @@ const addToWatchlistSchema = z.object({
   posterUrl: z.string().optional(),
   overview: z.string().optional(),
   releaseYear: z.number().int("releaseYear must be an integer"),
+  voteAverage: z.number().optional(),
   status: z
     .enum(["PLANNED", "WATCHING", "COMPLETED", "DROPPED"], {
       error: () => ({
@@ -35,7 +36,8 @@ const updateWatchlistSchema = z.object({
     .int("Rating must be an integer")
     .min(1, "Rating must be between 1 and 10")
     .max(10, "Rating must be between 1 and 10")
+    .nullable()
     .optional(),
-  notes: z.string().optional(),
+  notes: z.string().nullable().optional(),
 });
 export { addToWatchlistSchema, updateWatchlistSchema };

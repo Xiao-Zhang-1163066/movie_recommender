@@ -1,10 +1,20 @@
 import { getMovieById, IMG_URL, type MovieDetail } from "@/api/tmdb";
+import { Button } from "@/components/ui/button";
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { useAuth } from "@/context/AuthContext";
+import { useWatchlistIds } from "@/features/movies/useWatchlistIds";
+import { useAddToWatchlist } from "@/features/movies/useAddToWatchlist";
+import { useInTheaterMovies } from "@/features/movies/useInTheaterMovies";
+import WatchlistButton from "@/features/movies/WatchlistButton";
 
 function MovieDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { isAuthenticated } = useAuth();
+  const { watchlistIds, watchlistIdMap } = useWatchlistIds();
+  const { addToWatchlist, removeFromWatchlist } = useAddToWatchlist();
+  const { inTheaterMovies } = useInTheaterMovies();
   const [movie, setMovie] = useState<MovieDetail | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,6 +54,32 @@ function MovieDetailPage() {
   if (!movie) return null;
 
   const ratingStr = movie.vote_average?.toFixed(1) ?? "N/A";
+  const inList = watchlistIds.has(movie.id);
+  const isInTheatre = inTheaterMovies.some((m) => m.tmdbId === movie.id);
+
+  function handleWatchlistClick(e: React.MouseEvent) {
+    e.preventDefault();
+    if (!isAuthenticated) {
+      navigate("/login");
+      return;
+    }
+    if (!movie) return;
+    if (inList) {
+      const itemId = watchlistIdMap.get(movie.id);
+      if (itemId) removeFromWatchlist(itemId);
+    } else {
+      addToWatchlist({
+        tmdbId: movie.id,
+        title: movie.title,
+        posterUrl: movie.poster_path ? IMG_URL + movie.poster_path : null,
+        overview: movie.overview ?? null,
+        releaseYear: movie.release_date
+          ? parseInt(movie.release_date.slice(0, 4))
+          : null,
+        voteAverage: movie.vote_average ?? null,
+      });
+    }
+  }
 
   return (
     <div className="px-10 py-12 flex gap-12 max-w-5xl">
@@ -107,14 +143,25 @@ function MovieDetailPage() {
           {movie.overview}
         </p>
 
-        {/* CTA */}
-        <button
-          onClick={() => navigate(`/movie/${id}/cinemas`)}
-          className="self-start px-8 py-4 rounded-full font-bold text-sm transition-opacity hover:opacity-85"
-          style={{ background: "var(--lime)", color: "#000" }}
-        >
-          Buy Tickets
-        </button>
+        {/* CTAs */}
+        <div className="flex items-center gap-2">
+          {isInTheatre && (
+            <Button
+              variant="lime"
+              size="lg"
+              className="px-8"
+              onClick={() => navigate(`/movie/${id}/cinemas`)}
+            >
+              Buy Tickets
+            </Button>
+          )}
+          <WatchlistButton
+            inList={inList}
+            onClick={handleWatchlistClick}
+            size="lg"
+            className="px-8"
+          />
+        </div>
       </div>
     </div>
   );

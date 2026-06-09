@@ -1,3 +1,4 @@
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { useWatchlistIds } from "@/features/movies/useWatchlistIds";
 import { useAddToWatchlist } from "@/features/movies/useAddToWatchlist";
@@ -11,9 +12,10 @@ export default function ChatMovieCard({
   movie: ChatMovie;
   onOpen: (tmdbId: number) => void;
 }) {
+  const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
-  const { watchlistIds } = useWatchlistIds();
-  const { addToWatchlist } = useAddToWatchlist();
+  const { watchlistIds, watchlistIdMap } = useWatchlistIds();
+  const { addToWatchlist, removeFromWatchlist } = useAddToWatchlist();
   const {
     tmdbId,
     title,
@@ -89,21 +91,24 @@ export default function ChatMovieCard({
         {reason}
       </p>
 
-      {isAuthenticated ? (
-        <WatchlistButton
-          inList={watchlistIds.has(tmdbId)}
-          onClick={(e) => {
-            e.stopPropagation();
-            addToWatchlist({
-              tmdbId,
-              title,
-              posterUrl,
-              overview,
-              releaseYear,
-            });
-          }}
-        />
-      ) : null}
+      <WatchlistButton
+        inList={watchlistIds.has(tmdbId)}
+        size="xs"
+        className="mt-2 w-full"
+        onClick={(e) => {
+          e.stopPropagation();
+          if (!isAuthenticated) {
+            navigate("/login");
+            return;
+          }
+          if (watchlistIds.has(tmdbId)) {
+            const itemId = watchlistIdMap.get(tmdbId);
+            if (itemId) removeFromWatchlist(itemId);
+          } else {
+            addToWatchlist({ tmdbId, title, posterUrl, overview, releaseYear, voteAverage });
+          }
+        }}
+      />
     </div>
   );
 }

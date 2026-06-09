@@ -1,25 +1,14 @@
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Trash } from "lucide-react";
+import { Trash, Pencil } from "lucide-react";
 import { statusStyle } from "./types";
-import type { WatchlistItem, WatchlistStatus } from "./types";
-import { useWatchlistMutations } from "./useWatchlistMutations";
-import { useStatusChangeModal } from "./useStatusChangeModal";
+import type { WatchlistItem } from "./types";
 import { useDeleteModal } from "./useDeleteModal";
-import { useActiveTab } from "./useActiveTab";
-import { StatusChangeDialog } from "./StatusChangeDialog";
 import { DeleteDialog } from "./DeleteDialog";
+import { EditWatchlistDialog } from "./EditWatchlistDialog";
 
 export function WatchlistCard({ item }: { item: WatchlistItem }) {
-  const { activeTab } = useActiveTab();
-  const { handleRating: onRating } = useWatchlistMutations();
-  const {
-    openConfirmModal: onStatusChange,
-    pendingChange,
-    pendingRating,
-    setPendingRating,
-    handleConfirm,
-    handleCancel,
-  } = useStatusChangeModal();
+  const [editOpen, setEditOpen] = useState(false);
   const {
     setPendingDelete: onDelete,
     pendingDelete,
@@ -72,25 +61,34 @@ export function WatchlistCard({ item }: { item: WatchlistItem }) {
               >
                 {item.movie.title}
               </p>
-              {item.movie.voteAverage != null && (
-                <span
-                  className="shrink-0 text-xs font-bold px-1.5 py-0.5 rounded-md"
-                  style={{
-                    background: "rgba(0,0,0,0.35)",
-                    color: "var(--lime)",
-                  }}
-                >
-                  ★ {item.movie.voteAverage.toFixed(1)}
-                </span>
-              )}
+              <span
+                className="shrink-0 inline-block px-2.5 py-0.5 rounded-full text-xs font-bold"
+                style={{ background: s.bg, color: s.color }}
+              >
+                {item.status}
+              </span>
             </div>
 
-            <span
-              className="inline-block mt-2 px-2.5 py-0.5 rounded-full text-xs font-bold"
-              style={{ background: s.bg, color: s.color }}
-            >
-              {item.status}
-            </span>
+            <div className="flex items-center gap-2 mt-1.5">
+              <span
+                className="text-xs font-bold"
+                style={{ color: "var(--lime)" }}
+              >
+                ★{" "}
+                {item.movie.voteAverage != null
+                  ? item.movie.voteAverage.toFixed(1)
+                  : "N/A"}
+              </span>
+              <span className="text-xs" style={{ color: "var(--text-3)" }}>
+                ·
+              </span>
+              <span
+                className="text-xs font-bold"
+                style={{ color: "#60A5FA" }}
+              >
+                ★ {item.rating != null ? `${item.rating}/10` : "--"}
+              </span>
+            </div>
 
             {item.notes && (
               <p
@@ -100,74 +98,33 @@ export function WatchlistCard({ item }: { item: WatchlistItem }) {
                 {item.notes}
               </p>
             )}
-
-            {activeTab === "watched" && (
-              <div className="mt-3 flex items-center gap-2">
-                <span className="text-xs" style={{ color: "var(--text-2)" }}>
-                  Rating
-                </span>
-                <select
-                  value={item.rating ?? ""}
-                  onChange={(e) => onRating(item.id, Number(e.target.value))}
-                  className="text-xs rounded-lg px-2 py-1 font-semibold"
-                  style={{
-                    background: "var(--chip-bg)",
-                    color: "var(--text-2)",
-                    border: "none",
-                  }}
-                >
-                  <option value="">Rate…</option>
-                  {[...Array(10)].map((_, i) => (
-                    <option key={i + 1} value={i + 1}>
-                      {i + 1} / 10
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {activeTab === "watchlist" && (
-              <div className="mt-3 flex items-center gap-2">
-                <span className="text-xs" style={{ color: "var(--text-2)" }}>
-                  Status
-                </span>
-                <select
-                  value={item.status}
-                  onChange={(e) =>
-                    onStatusChange(item, e.target.value as WatchlistStatus)
-                  }
-                  className="text-xs rounded-lg px-2 py-1 font-semibold"
-                  style={{
-                    background: "var(--chip-bg)",
-                    color: "var(--text-2)",
-                    border: "none",
-                  }}
-                >
-                  <option value="PLANNED">Planned</option>
-                  <option value="WATCHING">Watching</option>
-                  <option value="COMPLETED">Completed</option>
-                  <option value="DROPPED">Dropped</option>
-                </select>
-              </div>
-            )}
           </div>
 
-          <Button
-            variant="secondary"
-            size="icon"
-            onClick={() => onDelete(item.id)}
-            className="shrink-0 hover:text-red-400 transition-colors"
-          >
-            <Trash />
-          </Button>
+          <div className="flex flex-col gap-1 shrink-0">
+            <Button
+              variant="secondary"
+              size="icon"
+              onClick={() => setEditOpen(true)}
+              className="hover:text-lime-400 transition-colors"
+            >
+              <Pencil />
+            </Button>
+            <Button
+              variant="secondary"
+              size="icon"
+              onClick={() => onDelete(item.id)}
+              className="hover:text-red-400 transition-colors"
+            >
+              <Trash />
+            </Button>
+          </div>
         </div>
       </div>
-      <StatusChangeDialog
-        pendingChange={pendingChange}
-        pendingRating={pendingRating}
-        onRatingChange={setPendingRating}
-        onConfirm={handleConfirm}
-        onCancel={handleCancel}
+
+      <EditWatchlistDialog
+        open={editOpen}
+        item={item}
+        onClose={() => setEditOpen(false)}
       />
       <DeleteDialog
         open={pendingDelete !== null}

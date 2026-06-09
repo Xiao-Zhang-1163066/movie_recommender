@@ -5,17 +5,24 @@ import { getWatchlist } from "@/services/watchlistService";
 export function useWatchlistIds() {
   const { isAuthenticated } = useAuth();
 
-  const { data: watchlistIds = new Set<number>() } = useQuery({
+  const { data } = useQuery({
     queryKey: ["watchlistItems"],
-    queryFn: getWatchlist, // same queryFn as useWatchlistItems
-    // transform only for THIS hook
-    select: (items) =>
-      new Set(
+    queryFn: getWatchlist,
+    select: (items) => ({
+      ids: new Set(
         items.map((item) => item.movie.tmdbId).filter(Boolean) as number[],
       ),
-    // only run this query when the user is authenticated
+      idMap: new Map(
+        items
+          .filter((item) => item.movie.tmdbId != null)
+          .map((item) => [item.movie.tmdbId as number, item.id]),
+      ),
+    }),
     enabled: isAuthenticated,
   });
 
-  return { watchlistIds };
+  return {
+    watchlistIds: data?.ids ?? new Set<number>(),
+    watchlistIdMap: data?.idMap ?? new Map<number, string>(),
+  };
 }
