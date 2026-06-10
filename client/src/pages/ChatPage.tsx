@@ -11,10 +11,13 @@ function ChatPage() {
     input,
     setInput,
     sendMessage,
+    stopStream,
+    errorMessage,
+    resetAt,
   } = useChat();
 
   return (
-    <div className="flex flex-col h-[calc(100vh-4rem)]">
+    <div className="flex flex-col h-[calc(100dvh-4rem)]">
       <MessageList
         messages={messages}
         streamingText={streamingText}
@@ -26,7 +29,10 @@ function ChatPage() {
         input={input}
         onInputChange={setInput}
         onSend={sendMessage}
+        onStop={stopStream}
         isLoading={isLoading}
+        errorMessage={errorMessage}
+        resetAt={resetAt}
       />
     </div>
   );

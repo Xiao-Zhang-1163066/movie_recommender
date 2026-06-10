@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
@@ -70,6 +70,16 @@ function MessageList({
 }) {
   const [openTmdbId, setOpenTmdbId] = useState<number | null>(null);
 
+  // Invisible marker at the bottom of the list — scrollIntoView targets it.
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Scroll to bottom when a message is added or loading state changes.
+  // Intentionally excludes streamingText — firing on every delta would queue
+  // dozens of scroll animations and make the response feel jittery.
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages.length, isLoading]);
+
   return (
     <div className="flex-1 overflow-y-auto px-10 py-8">
       <div className="max-w-2xl mx-auto flex flex-col gap-3">
@@ -120,7 +130,7 @@ function MessageList({
           </div>
         ))}
 
-        {isLoading && !streamingText && streamingMovies.length === 0 && (
+        {isLoading && !streamingText && (
           <div
             className="self-start px-4 py-3 text-sm leading-relaxed"
             style={{
@@ -133,29 +143,33 @@ function MessageList({
           </div>
         )}
 
-        {(streamingText || streamingMovies.length > 0) && (
+        {/* Only render once text has started arriving — this guarantees the
+            text bubble always appears before movie cards, even if the model
+            emits a recommend_movies tool call before its first text delta. */}
+        {streamingText && (
           <div
             className="self-start flex flex-col items-start"
             style={{ maxWidth: "100%" }}
           >
-            {streamingText && (
-              <div
-                className="px-4 py-3 text-sm leading-relaxed"
-                style={{
-                  maxWidth: "80%",
-                  borderRadius: "14px",
-                  background: "var(--surface-2)",
-                }}
-              >
-                <Markdown>{streamingText}</Markdown>
-              </div>
-            )}
+            <div
+              className="px-4 py-3 text-sm leading-relaxed"
+              style={{
+                maxWidth: "80%",
+                borderRadius: "14px",
+                background: "var(--surface-2)",
+              }}
+            >
+              <Markdown>{streamingText}</Markdown>
+            </div>
             {streamingMovies.length > 0 && (
               <MovieGrid movies={streamingMovies} onOpen={setOpenTmdbId} />
             )}
           </div>
         )}
       </div>
+
+      {/* Scroll anchor — sits below all content so scrollIntoView lands at the bottom */}
+      <div ref={bottomRef} />
 
       {openTmdbId !== null && (
         <MovieDetailModal
