@@ -6,9 +6,11 @@ import type { WatchlistItem } from "./types";
 import { useDeleteModal } from "./useDeleteModal";
 import { DeleteDialog } from "./DeleteDialog";
 import { EditWatchlistDialog } from "./EditWatchlistDialog";
+import { useNavigate } from "react-router-dom";
 
 export function WatchlistCard({ item }: { item: WatchlistItem }) {
   const [editOpen, setEditOpen] = useState(false);
+  const navigate = useNavigate();
   const {
     setPendingDelete: onDelete,
     pendingDelete,
@@ -17,16 +19,20 @@ export function WatchlistCard({ item }: { item: WatchlistItem }) {
   } = useDeleteModal();
 
   const s = statusStyle[item.status];
+  const toDetail = () => {
+    if (item.movie.tmdbId) navigate(`/movie/${item.movie.tmdbId}`);
+  };
 
   return (
     <>
       <div
-        className="flex items-start gap-3 p-3"
+        className="flex items-start gap-3 p-3 cursor-pointer"
         style={{
           background: "var(--surface-2)",
           borderRadius: "14px",
           border: "1px solid rgba(255,255,255,0.05)",
         }}
+        onClick={toDetail}
       >
         <div
           className="shrink-0 w-14 overflow-hidden"
@@ -104,7 +110,7 @@ export function WatchlistCard({ item }: { item: WatchlistItem }) {
             <Button
               variant="secondary"
               size="icon"
-              onClick={() => setEditOpen(true)}
+              onClick={(e) => { e.stopPropagation(); setEditOpen(true); }}
               className="hover:text-lime-400 transition-colors"
             >
               <Pencil />
@@ -112,7 +118,7 @@ export function WatchlistCard({ item }: { item: WatchlistItem }) {
             <Button
               variant="secondary"
               size="icon"
-              onClick={() => onDelete(item.id)}
+              onClick={(e) => { e.stopPropagation(); onDelete(item.id); }}
               className="hover:text-red-400 transition-colors"
             >
               <Trash />

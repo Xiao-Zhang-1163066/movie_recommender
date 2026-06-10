@@ -68,7 +68,7 @@ export default function MovieCard({ movie }: { movie: MovieCardData }) {
         inList={inList}
         onClick={handleWatchlistClick}
         size="xs"
-        className="mt-2 w-full"
+        className="mt-2 w-full rounded-full"
       />
     </div>
   );

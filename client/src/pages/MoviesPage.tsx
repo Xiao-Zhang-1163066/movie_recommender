@@ -4,7 +4,7 @@ import DiscoverMovieGrid from "@/features/movies/DiscoverMovieGrid";
 
 function MoviesPage() {
   return (
-    <div className="px-10 py-10">
+    <div className="px-4 md:px-10 py-10">
       <SectionHeading title="In Theatres Now" />
       <InTheaterMovieGrid />
       <SectionHeading title="Discover" />

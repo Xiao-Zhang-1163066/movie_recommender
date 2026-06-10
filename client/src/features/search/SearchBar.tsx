@@ -1,4 +1,4 @@
-import { SearchIcon } from "lucide-react";
+import { SearchIcon, X } from "lucide-react";
 import { useSearchMovies } from "./useSearchMovies";
 import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
@@ -30,24 +30,33 @@ function SearchBar() {
   }
 
   return (
-    <div ref={containerRef} className="relative w-64">
+    <div ref={containerRef} className="relative w-full">
       <form
         onSubmit={(e) => {
           e.preventDefault();
           handleShowAll();
         }}
       >
+        <SearchIcon
+          size={16}
+          className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+        />
         <input
           type="text"
           placeholder="Search movies..."
-          className="w-full pl-4 pr-10 py-2 rounded-full bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary transition"
+          className="w-full pl-9 pr-9 py-2 rounded-full bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary transition"
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
         />
-        <SearchIcon
-          size={16}
-          className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground"
-        />
+        {searchTerm && (
+          <button
+            type="button"
+            onClick={() => setSearchTerm("")}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <X size={16} />
+          </button>
+        )}
       </form>
 
       {showDropdown && (

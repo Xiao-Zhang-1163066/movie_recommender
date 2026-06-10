@@ -36,7 +36,7 @@ function SearchPage() {
   }
 
   return (
-    <div className="px-10 py-10">
+    <div className="px-4 md:px-10 py-10">
       <h2 className="text-xl font-semibold mb-1">Results for "{query}"</h2>
       <p className="text-sm mb-6" style={{ color: "var(--text-2)" }}>
         {totalResults} {totalResults === 1 ? "movie" : "movies"} found
