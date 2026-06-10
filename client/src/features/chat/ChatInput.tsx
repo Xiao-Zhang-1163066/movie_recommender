@@ -66,7 +66,7 @@ function ChatInput({ input, onInputChange, onSend, onStop, isLoading, errorMessa
         <textarea
           ref={textareaRef}
           rows={1}
-          className="flex-1 bg-transparent text-sm outline-none placeholder-text-2 resize-none leading-relaxed py-1"
+          className="flex-1 bg-transparent text-base md:text-sm outline-none placeholder-text-2 resize-none leading-relaxed py-1"
           style={{ color: "var(--foreground)", maxHeight: "96px", overflowY: "auto" }}
           value={input}
           onChange={(e) => {

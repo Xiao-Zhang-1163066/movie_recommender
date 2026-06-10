@@ -44,7 +44,7 @@ function SearchBar() {
         <input
           type="text"
           placeholder="Search movies..."
-          className="w-full pl-9 pr-9 py-2 rounded-full bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary transition"
+          className="w-full pl-9 pr-9 py-2 rounded-full bg-secondary text-base md:text-sm focus:outline-none focus:ring-2 focus:ring-primary transition"
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
         />
