@@ -26,6 +26,45 @@
 
 ---
 
+## Auth Migration
+
+### Current problem
+Safari (iOS) blocks the `jwt` httpOnly cookie on cross-origin requests (SWA → Container Apps on different domains). Every authenticated call on iPhone returns 401. Mac Chrome works because Chrome still allows `SameSite=None; Secure` cross-origin cookies; Safari's ITP does not.
+
+### Phase 1 — Bearer token in localStorage (implement now)
+Switch from cookie-based auth to a `Bearer` token sent in the `Authorization` header. Stored in `localStorage`.
+
+**Why this fixes it:** `Authorization` headers are set deliberately by JS, never sent automatically by the browser — no cross-origin cookie restrictions apply.
+
+**Trade-off:** `localStorage` is readable by JS (XSS risk). Mitigated by keeping token expiry short (7 days) and the fact that React JSX escapes output by default — XSS surface is small.
+
+**Files to change (8):**
+- `utils/generateToken.js` — remove `res.cookie()`, just return the token
+- `middleware/authMiddleware.js` — read `Authorization: Bearer <token>` header instead of `req.cookies.jwt`
+- `controller/authController.js` — update `logout` (no cookie to clear)
+- `context/AuthContext.tsx` — init `isAuthenticated` from `localStorage` on mount; store/clear token on login/logout
+- `services/authService.ts` — save token to `localStorage` after login/register; pass as `Bearer` on `getMe`
+- `services/watchlistService.ts` — replace `credentials: "include"` with `Authorization: Bearer` header
+- `services/movieService.ts` — same
+- `services/chatService.ts` — same
+
+### Phase 2 — Access token + refresh token with httpOnly cookie (future)
+The proper long-term solution once SWA Standard tier is adopted (enables linked backend proxy — makes cookies first-party).
+
+- **Access token** — 15 min expiry, stored in memory (React state). Gone on page refresh. XSS cannot steal it.
+- **Refresh token** — 30 day expiry, stored in `httpOnly` cookie. XSS cannot steal it.
+- **Silent refresh** — on 401, frontend calls `POST /api/auth/refresh`, gets a new access token, retries the original request transparently.
+- **Token rotation** — each refresh issues a new refresh token and invalidates the old one (stored in DB).
+
+**Why Phase 2 needs the proxy:** the refresh token cookie has the same cross-origin Safari problem. The SWA linked backend proxy makes all requests same-origin so the cookie is first-party.
+
+**Extra backend work needed for Phase 2:**
+- `POST /api/auth/refresh` endpoint
+- `RefreshToken` table in Prisma schema (to support rotation + invalidation)
+- Axios/fetch interceptor on frontend to handle silent refresh
+
+---
+
 ## Priority Order
 
 | # | Task | Effort |

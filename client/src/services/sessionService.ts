@@ -13,10 +13,7 @@ export async function getSessions(
 ): Promise<Session[]> {
   const res = await fetch(
     `${API_BASE}/api/sessions?tmdbId=${tmdbId}&date=${date}`,
-    {
-      method: "GET",
-      credentials: "include",
-    },
+    { method: "GET" },
   );
   if (!res.ok) {
     const errorData = await res.json();

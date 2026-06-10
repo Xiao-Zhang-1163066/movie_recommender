@@ -1,5 +1,5 @@
-import { createContext, useContext, useEffect, useState } from "react";
-import { getMe, logout as logoutService } from "@/services/authService";
+import { createContext, useContext, useState } from "react";
+import { logout as logoutService } from "@/services/authService";
 type AuthContextType = {
   isAuthenticated: boolean;
   isLoading: boolean;
@@ -8,24 +8,10 @@ type AuthContextType = {
 };
 const AuthContext = createContext<AuthContextType | null>(null);
 function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-
-  // On mount, check if user is authenticated
-  useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        const res = await getMe();
-        setIsAuthenticated(res);
-      } catch (error) {
-        console.error("Error checking auth:", error);
-        setIsAuthenticated(false);
-      } finally {
-        setIsLoading(false); // always runs, success or failure
-      }
-    };
-    checkAuth();
-  }, []);
+  // Initialise synchronously from localStorage — no async /me check needed.
+  // Expired tokens are caught on the first API call (401 → redirect to login).
+  const [isAuthenticated, setIsAuthenticated] = useState(() => !!localStorage.getItem("jwt"));
+  const isLoading = false;
 
   function login() {
     setIsAuthenticated(true);
