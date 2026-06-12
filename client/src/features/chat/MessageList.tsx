@@ -81,7 +81,7 @@ function MessageList({
   }, [messages.length, isLoading]);
 
   return (
-    <div className="flex-1 overflow-y-auto px-10 py-8">
+    <div className="flex-1 min-h-0 overflow-y-auto px-10 py-8">
       <div className="max-w-2xl mx-auto flex flex-col gap-3">
         {messages.length === 0 && !streamingText && !streamingMovies.length && (
           <div className="text-center pt-16">

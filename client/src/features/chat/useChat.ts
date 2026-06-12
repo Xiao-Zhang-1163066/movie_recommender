@@ -111,9 +111,10 @@ export function useChat() {
       abortControllerRef.current = null;
     }
 
-    // Commit whatever was streamed — this runs after a clean finish OR after
-    // an AbortError (partial text is still useful to the user).
-    if (assistantText || assistantMovies.length) {
+    // Only commit if text arrived — movies without an explanation are
+    // confusing and not useful, so if Stop was pressed before any text
+    // streamed we simply discard the partial result.
+    if (assistantText) {
       setMessages((prev) => [
         ...prev,
         {

@@ -1,13 +1,3 @@
-import { useEffect, useRef } from "react";
-
-// Collapses the textarea to "auto" first so the browser recalculates scrollHeight
-// from scratch, then expands to that height capped at 96px (~4 rows).
-// Step 1 is required — without it the box never shrinks when text is deleted.
-function resize(el: HTMLTextAreaElement) {
-  el.style.height = "auto";
-  el.style.height = `${Math.min(el.scrollHeight, 96)}px`;
-}
-
 // Converts the RateLimit-Reset timestamp into a human-readable suffix.
 // Returns "" once the window has already expired so stale text never shows.
 function formatResetTime(resetAt: Date | null): string {
@@ -31,17 +21,9 @@ type Props = {
 };
 
 function ChatInput({ input, onInputChange, onSend, onStop, isLoading, errorMessage, resetAt }: Props) {
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  // Re-run resize when input changes externally — most importantly when
-  // sendMessage() clears it to "", which must reset the textarea to one row.
-  useEffect(() => {
-    if (textareaRef.current) resize(textareaRef.current);
-  }, [input]);
-
   return (
     <div
-      className="px-10 py-4"
+      className="px-4 py-4"
       style={{
         borderTop: "1px solid rgba(255,255,255,0.06)",
         background: "rgba(10,10,10,0.95)",
@@ -50,36 +32,24 @@ function ChatInput({ input, onInputChange, onSend, onStop, isLoading, errorMessa
       {/* Rate-limit / error banner — only mounts when errorMessage is set.
           The user can still type but Send is disabled until the window resets. */}
       {errorMessage && (
-        <p className="max-w-2xl mx-auto text-xs text-center mb-2" style={{ color: "var(--text-2)" }}>
+        <p className="text-xs text-center mb-2" style={{ color: "var(--text-2)" }}>
           {errorMessage}{formatResetTime(resetAt ?? null)}
         </p>
       )}
 
       <div
-        className="max-w-2xl mx-auto flex gap-3 items-end p-2 pl-5"
+        className="flex gap-3 items-center p-2 pl-5"
         style={{
           background: "var(--surface-2)",
-          // 24px instead of 999px — a perfect pill looks odd when the box grows tall
-          borderRadius: "24px",
+          borderRadius: "999px",
         }}
       >
-        <textarea
-          ref={textareaRef}
-          rows={1}
-          className="flex-1 bg-transparent text-base md:text-sm outline-none placeholder-text-2 resize-none leading-relaxed py-1"
-          style={{ color: "var(--foreground)", maxHeight: "96px", overflowY: "auto" }}
+        <input
+          className="flex-1 bg-transparent text-base md:text-sm outline-none placeholder-text-2"
+          style={{ color: "var(--foreground)" }}
           value={input}
-          onChange={(e) => {
-            onInputChange(e.target.value);
-            resize(e.target);
-          }}
-          onKeyDown={(e) => {
-            // Shift+Enter inserts a newline; bare Enter sends (standard chat behaviour).
-            if (e.key === "Enter" && !e.shiftKey && !isLoading) {
-              e.preventDefault();
-              onSend();
-            }
-          }}
+          onChange={(e) => onInputChange(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && !isLoading && onSend()}
           placeholder="Ask for a movie recommendation…"
           disabled={isLoading}
         />
