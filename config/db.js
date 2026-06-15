@@ -1,11 +1,16 @@
 import "dotenv/config";
-// import { PrismaClient } from "@prisma/client";
 import { PrismaClient } from "../generated/prisma/index.js";
-
 import { PrismaPg } from "@prisma/adapter-pg";
-// import { PrismaClient } from "./generated/prisma";
 
-const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
+// DATABASE_URL is the Neon pooled URL (PgBouncer). DIRECT_URL bypasses the
+// pooler and is used only for migrations in prisma.config.ts.
+const adapter = new PrismaPg({
+  connectionString: process.env.DATABASE_URL,
+  max: 10,                    // stay within Neon's pooler connection limit
+  idleTimeoutMillis: 10_000,  // release idle connections quickly
+  connectionTimeoutMillis: 5_000, // fail fast rather than queue indefinitely
+});
+
 const prisma = new PrismaClient({
   adapter,
   log:
