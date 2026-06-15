@@ -1,30 +1,34 @@
 import { prisma } from "../config/db.js";
-// let movies = [
-//   { id: 1, title: "The Shawshank Redemption", year: 1994 },
-//   { id: 2, title: "The Godfather", year: 1972 },
-//   { id: 3, title: "The Dark Knight", year: 2008 },
-// ];
-// let users = [
-//   { id: 1, name: "John Doe", email: "johndoe@gmail.com" },
-//   { id: 2, name: "Jane Doe", email: "janedoe@gmail.com" },
-// ];
+import { cache } from "../config/redis.js";
+
+const CACHE_KEYS = {
+  all: "movies:all",
+  inTheaters: "movies:inTheaters",
+};
 
 // GET /movies -public
 const getAllMovies = async (req, res) => {
   const { inTheaters } = req.query;
+  const cacheKey = inTheaters === "true" ? CACHE_KEYS.inTheaters : CACHE_KEYS.all;
+
+  const cached = await cache.get(cacheKey);
+  if (cached) {
+    return res.status(200).json(cached);
+  }
+
   const where =
     inTheaters === "true"
       ? { sessions: { some: { startsAt: { gte: new Date() } } } }
       : undefined;
   const movies = await prisma.movie.findMany({ where });
-  res.status(200).json({
+  const body = {
     status: "success",
-    data: {
-      movies: movies,
-      movieNumber: movies.length,
-    },
+    data: { movies, movieNumber: movies.length },
     message: "Movie list retrieved successfully",
-  });
+  };
+
+  await cache.set(cacheKey, body);
+  res.status(200).json(body);
 };
 
 // GET /movies/:id -public
@@ -60,6 +64,7 @@ const createMovie = async (req, res) => {
       createdBy: req.user.id,
     },
   });
+  await cache.del(CACHE_KEYS.all, CACHE_KEYS.inTheaters);
   res.status(201).json({
     status: "success",
     data: {
@@ -97,6 +102,7 @@ const updateMovie = async (req, res) => {
       posterUrl,
     },
   });
+  await cache.del(CACHE_KEYS.all, CACHE_KEYS.inTheaters);
   res.status(200).json({
     status: "success",
     data: {
@@ -123,6 +129,7 @@ const deleteMovie = async (req, res) => {
     });
   }
   await prisma.movie.delete({ where: { id: movieId } });
+  await cache.del(CACHE_KEYS.all, CACHE_KEYS.inTheaters);
   res.status(200).json({
     status: "success",
     message: "Movie deleted successfully",
