@@ -1,3 +1,5 @@
+import { Button } from "@/components/ui/button";
+
 // Converts the RateLimit-Reset timestamp into a human-readable suffix.
 // Returns "" once the window has already expired so stale text never shows.
 function formatResetTime(resetAt: Date | null): string {
@@ -5,7 +7,9 @@ function formatResetTime(resetAt: Date | null): string {
   const diffMs = resetAt.getTime() - Date.now();
   if (diffMs <= 0) return "";
   const mins = Math.ceil(diffMs / 60_000);
-  return mins <= 1 ? " Try again in a moment." : ` Try again in ${mins} minutes.`;
+  return mins <= 1
+    ? " Try again in a moment."
+    : ` Try again in ${mins} minutes.`;
 }
 
 type Props = {
@@ -20,20 +24,32 @@ type Props = {
   resetAt?: Date | null;
 };
 
-function ChatInput({ input, onInputChange, onSend, onStop, isLoading, errorMessage, resetAt }: Props) {
+function ChatInput({
+  input,
+  onInputChange,
+  onSend,
+  onStop,
+  isLoading,
+  errorMessage,
+  resetAt,
+}: Props) {
   return (
     <div
       className="px-4 py-4"
       style={{
-        borderTop: "1px solid rgba(255,255,255,0.06)",
+        borderTop: "1px solid rgba(255, 255, 255, 0.05)",
         background: "rgba(10,10,10,0.95)",
       }}
     >
       {/* Rate-limit / error banner — only mounts when errorMessage is set.
           The user can still type but Send is disabled until the window resets. */}
       {errorMessage && (
-        <p className="text-xs text-center mb-2" style={{ color: "var(--text-2)" }}>
-          {errorMessage}{formatResetTime(resetAt ?? null)}
+        <p
+          className="text-xs text-center mb-2"
+          style={{ color: "var(--text-2)" }}
+        >
+          {errorMessage}
+          {formatResetTime(resetAt ?? null)}
         </p>
       )}
 
@@ -57,22 +73,22 @@ function ChatInput({ input, onInputChange, onSend, onStop, isLoading, errorMessa
         {/* Swap Send ↔ Stop based on loading state.
             Stop calls onStop which aborts the in-flight fetch. */}
         {isLoading ? (
-          <button
+          <Button
+            variant="secondary"
             onClick={onStop}
-            className="px-5 py-2.5 text-sm font-bold rounded-full shrink-0"
-            style={{ background: "rgba(255,255,255,0.12)", color: "var(--foreground)" }}
+            className="rounded-full px-5 py-2.5"
           >
             ■ Stop
-          </button>
+          </Button>
         ) : (
-          <button
+          <Button
+            variant="lime"
             onClick={onSend}
             disabled={!input.trim() || !!errorMessage}
-            className="px-5 py-2.5 text-sm font-bold rounded-full shrink-0 transition-opacity disabled:opacity-40"
-            style={{ background: "var(--lime)", color: "#000" }}
+            className="px-5 py-2.5"
           >
             Send
-          </button>
+          </Button>
         )}
       </div>
     </div>

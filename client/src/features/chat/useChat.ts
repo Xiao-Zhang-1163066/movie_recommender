@@ -24,11 +24,11 @@ export function useChat() {
     abortControllerRef.current?.abort();
   }
 
-  async function sendMessage() {
-    if (!input.trim() || isLoading) return;
-
-    // Capture input before clearing it so we can restore it on error.
-    const userInput = input;
+  // `override` lets example chips send a pre-set question without going through
+  // setInput first (setState is async so reading `input` right after would miss it).
+  async function sendMessage(override?: string) {
+    const userInput = (override ?? input).trim();
+    if (!userInput || isLoading) return;
     const newUserMessage: Message = { role: "user", content: userInput };
     const updatedMessages = [...messages, newUserMessage];
 
@@ -46,6 +46,7 @@ export function useChat() {
 
     let assistantText = "";
     let assistantMovies: ChatMovie[] = [];
+    let modelRateLimitHit = false;
 
     try {
       const response = await postChatMessage(
@@ -59,7 +60,7 @@ export function useChat() {
 
       // The backend streams NDJSON: one JSON event per line. Lines can arrive
       // split across chunks, so we buffer and only parse on a newline.
-      while (true) {
+      outer: while (true) {
         const { value, done } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
@@ -77,8 +78,21 @@ export function useChat() {
             assistantMovies = [...assistantMovies, ...event.v];
             setStreamingMovies(assistantMovies);
           } else if (event.t === "error") {
-            assistantText += `\n\n⚠️ ${event.v}`;
-            setStreamingText(assistantText);
+            if (event.kind === "rate_limit") {
+              // Stop reading — show the banner and disable send. Commit any
+              // partial text that already streamed so it's not lost.
+              modelRateLimitHit = true;
+              await reader.cancel();
+              break outer;
+            } else if (event.kind === "context_limit") {
+              assistantText += "\n\n⚠️ This conversation is too long for me to continue. Please start a new chat.";
+              setStreamingText(assistantText);
+              await reader.cancel();
+              break outer;
+            } else {
+              assistantText += `\n\n⚠️ ${event.v}`;
+              setStreamingText(assistantText);
+            }
           }
         }
       }
@@ -109,6 +123,12 @@ export function useChat() {
       setStreamingMovies([]);
       setIsLoading(false);
       abortControllerRef.current = null;
+    }
+
+    // Model-level rate limit: show the banner and disable send. We keep the
+    // user message visible and commit any text that already streamed.
+    if (modelRateLimitHit) {
+      setErrorMessage("The AI service is busy — you've hit its rate limit. Please wait a moment before sending another message.");
     }
 
     // Only commit if text arrived — movies without an explanation are

@@ -144,3 +144,13 @@
     @apply font-sans;
   }
 }
+
+.example-chip {
+  color: var(--text-2);
+  border-color: rgba(255, 255, 255, 0.08);
+  transition: color 0.15s, border-color 0.15s;
+}
+.example-chip:hover {
+  color: var(--foreground);
+  border-color: rgba(255, 255, 255, 0.22);
+}

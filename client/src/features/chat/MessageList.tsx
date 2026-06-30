@@ -57,16 +57,25 @@ function MovieGrid({
   );
 }
 
+const EXAMPLE_QUESTIONS = [
+  "What's showing in Christchurch right now?",
+  "Recommend a thriller for tonight",
+  "Something funny for a date night",
+  "Best sci-fi I can watch this weekend",
+];
+
 function MessageList({
   messages,
   streamingText,
   streamingMovies,
   isLoading,
+  onExampleClick,
 }: {
   messages: Message[];
   streamingText: string;
   streamingMovies: ChatMovie[];
   isLoading: boolean;
+  onExampleClick: (q: string) => void;
 }) {
   const [openTmdbId, setOpenTmdbId] = useState<number | null>(null);
 
@@ -84,16 +93,34 @@ function MessageList({
     <div className="flex-1 min-h-0 overflow-y-auto px-10 py-8">
       <div className="max-w-2xl mx-auto flex flex-col gap-3">
         {messages.length === 0 && !streamingText && !streamingMovies.length && (
-          <div className="text-center pt-16">
-            <p
-              className="text-3xl font-black mb-2"
-              style={{ letterSpacing: "-0.03em" }}
-            >
-              What are you in the mood for?
-            </p>
-            <p className="text-sm" style={{ color: "var(--text-2)" }}>
-              Ask me anything — genres, moods, actors, release years.
-            </p>
+          <div className="text-center pt-16 flex flex-col items-center gap-6">
+            <div>
+              <p
+                className="text-3xl font-black mb-2"
+                style={{ letterSpacing: "-0.03em" }}
+              >
+                What are you in the mood for?
+              </p>
+              <p className="text-sm" style={{ color: "var(--text-2)" }}>
+                Ask me anything — genres, moods, actors, release years.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap justify-center gap-2">
+              {EXAMPLE_QUESTIONS.map((q) => (
+                <button
+                  key={q}
+                  onClick={() => onExampleClick(q)}
+                  className="example-chip px-4 py-2 text-sm rounded-full"
+                  style={{
+                    background: "var(--surface-2)",
+                    border: "1px solid",
+                  }}
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
           </div>
         )}
 

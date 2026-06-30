@@ -35,14 +35,63 @@ const SYSTEM_PROMPT = `You are AI Movie Mate, a concierge that recommends films 
   Keep your text reply short and conversational (a sentence or two framing the picks). Do not 
   describe posters or ratings in prose — the card shows those.`;
 
+// Classifies model-provider errors so the client can show targeted help text
+// instead of a generic "something went wrong" message.
+function classifyModelError(err) {
+  const msg = String(err?.message ?? "").toLowerCase();
+  const body = String(err?.responseBody ?? err?.data ?? "").toLowerCase();
+  const combined = msg + " " + body;
+  const status = err?.statusCode ?? err?.status;
+
+  if (status === 429 || combined.includes("rate_limit") || combined.includes("rate limit")) {
+    return "rate_limit";
+  }
+  if (combined.includes("context length") || combined.includes("context window") || combined.includes("maximum context")) {
+    return "context_limit";
+  }
+  return "general";
+}
+
+const MODEL_ERROR_MESSAGES = {
+  rate_limit: "The AI service is busy — you've hit its rate limit. Please wait a moment before sending another message.",
+  context_limit: "This conversation is too long for me to continue. Please start a new chat.",
+  general: "The assistant ran into a problem.",
+};
+
+// Wraps fetch with a per-request timeout and exponential-backoff retries.
+// Only retries on network errors and 5xx responses — 4xx are caller errors and
+// should surface immediately rather than burning quota retrying a bad request.
+async function fetchWithRetry(url, { maxAttempts = 3, timeoutMs = 8_000 } = {}) {
+  let lastError;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { signal: controller.signal });
+      if (res.ok) return res;
+      if (res.status < 500) throw new Error(`TMDB ${res.status}`); // don't retry 4xx
+      lastError = new Error(`TMDB ${res.status}`);
+    } catch (err) {
+      lastError = err; // network error or timeout — fall through to retry
+    } finally {
+      clearTimeout(timer);
+    }
+    if (attempt < maxAttempts) {
+      // 500 ms → 1 000 ms backoff
+      await new Promise((r) => setTimeout(r, 500 * 2 ** (attempt - 1)));
+    }
+  }
+  throw lastError;
+}
+
 /**
  * POST /chat
  * Body: { messages: [{ role, content }] }
  *
  * Streams a custom NDJSON protocol — one JSON object per line:
- *   { "t": "text",   "v": "<delta>" }   incremental assistant text
- *   { "t": "movies", "v": [ ...cards ] } a recommend_movies result
- *   { "t": "error",  "v": "<message>" } a stream-level error
+ *   { "t": "text",   "v": "<delta>" }                 incremental assistant text
+ *   { "t": "movies", "v": [ ...cards ] }              a recommend_movies result
+ *   { "t": "error",  "v": "<message>", "kind": "..." } a stream-level error
  */
 export const chat = async (req, res, next) => {
   try {
@@ -113,8 +162,7 @@ export const chat = async (req, res, next) => {
           query: z.string(),
         }),
         execute: async ({ query }) => {
-          // fetch from https://api.themoviedb.org/3/search/movie
-          const data = await fetch(
+          const data = await fetchWithRetry(
             `https://api.themoviedb.org/3/search/movie?api_key=${process.env.TMDB_API_KEY}&query=${encodeURIComponent(query)}`,
           ).then((res) => res.json());
           // return only: id, title, release_date, overview from results.results
@@ -134,9 +182,7 @@ export const chat = async (req, res, next) => {
           movieId: z.string(),
         }),
         execute: async ({ movieId }) => {
-          // fetch from https://api.themoviedb.org/3/movie/{movieId}
-          // query params: api_key
-          const data = await fetch(
+          const data = await fetchWithRetry(
             `https://api.themoviedb.org/3/movie/${movieId}?api_key=${process.env.TMDB_API_KEY}`,
           ).then((res) => res.json());
           // return only: id, title, release_date, overview, runtime, genres
@@ -231,7 +277,7 @@ export const chat = async (req, res, next) => {
           const inTheatreIds = new Set(inTheatreMovies.map((m) => m.tmdbId));
           const cards = await Promise.all(
             recommendations.map(async ({ tmdbId, reason }) => {
-              const data = await fetch(
+              const data = await fetchWithRetry(
                 `https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${process.env.TMDB_API_KEY}`,
               ).then((r) => r.json());
               return {
@@ -288,24 +334,20 @@ export const chat = async (req, res, next) => {
           res.write(JSON.stringify({ t: "movies", v: part.output }) + "\n");
         } else if (part.type === "error") {
           // The SDK surfaces model/tool failures as a stream part rather than
-          // throwing — forward it so the loop doesn't just end silently.
+          // throwing — classify and forward so the client can show targeted help.
           console.error("Chat fullStream error part:", part.error);
+          const kind = classifyModelError(part.error);
           res.write(
-            JSON.stringify({
-              t: "error",
-              v: "The assistant ran into a problem.",
-            }) + "\n",
+            JSON.stringify({ t: "error", v: MODEL_ERROR_MESSAGES[kind], kind }) + "\n",
           );
         }
       }
     } catch (streamErr) {
       console.error("Chat stream error:", streamErr);
       if (!res.writableEnded) {
+        const kind = classifyModelError(streamErr);
         res.write(
-          JSON.stringify({
-            t: "error",
-            v: "The assistant ran into a problem.",
-          }) + "\n",
+          JSON.stringify({ t: "error", v: MODEL_ERROR_MESSAGES[kind], kind }) + "\n",
         );
       }
     } finally {

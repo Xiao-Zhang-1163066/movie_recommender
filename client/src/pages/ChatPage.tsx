@@ -23,6 +23,7 @@ function ChatPage() {
         streamingText={streamingText}
         streamingMovies={streamingMovies}
         isLoading={isLoading}
+        onExampleClick={sendMessage}
       />
 
       <ChatInput
