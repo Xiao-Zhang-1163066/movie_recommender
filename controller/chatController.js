@@ -3,6 +3,7 @@ import { streamText, tool, stepCountIs } from "ai";
 import { z } from "zod";
 import { prisma } from "../config/db.js";
 import { createGroq } from "@ai-sdk/groq";
+import { cache } from "../config/redis.js";
 
 // Step 1: create the AI provider
 // const google = createGoogleGenerativeAI({
@@ -15,25 +16,26 @@ const groq = createGroq({
 
 const TMDB_IMG_BASE = "https://image.tmdb.org/t/p/w500";
 
-const SYSTEM_PROMPT = `You are AI Movie Mate, a concierge that recommends films to users in 
+function buildSystemPrompt(nowShowing) {
+  return `You are AI Movie Mate, a concierge that recommends films to users in
   Christchurch, New Zealand.
 
-  How to recommend:
-  1. Before recommending, call get_now_showing to see which films are currently playing in 
-  Christchurch cinemas.
-  2. At least one of your recommendations MUST come from that now-showing list. You may also 
-  suggest other relevant films that are not currently playing.
-  3. Never invent TMDB ids. Every id must come from get_now_showing or search_movies — real 
-  movies only. Use get_movie_details if you need runtime or genres before deciding.
-  4. When you suggest specific films you MUST call recommend_movies, passing each film's TMDB 
-  id and a one-sentence reason it fits what the user asked for. The reason is shown on the 
-  card.
-  5. If nothing currently playing fits the request, say so honestly and recommend the closest 
-  real films as options that aren't in theatres right now — do not force an ill-fitting 
-  in-theatre pick.
+  Films currently playing in Christchurch cinemas:
+  ${JSON.stringify(nowShowing)}
 
-  Keep your text reply short and conversational (a sentence or two framing the picks). Do not 
+  How to recommend:
+  1. At least one of your recommendations MUST come from the now-showing list above. You may
+  also suggest other relevant films that are not currently playing.
+  2. Never invent TMDB ids. Every tmdbId must come from the now-showing list or search_movies —
+  real movies only. Use get_movie_details if you need runtime or genres before deciding.
+  3. When you suggest specific films you MUST call recommend_movies, passing each film's TMDB
+  id and a one-sentence reason it fits what the user asked for. The reason is shown on the card.
+  4. If nothing currently playing fits the request, say so honestly and recommend the closest
+  real films that aren't in theatres — do not force an ill-fitting in-theatre pick.
+
+  Keep your text reply short and conversational (a sentence or two framing the picks). Do not
   describe posters or ratings in prose — the card shows those.`;
+}
 
 // Classifies model-provider errors so the client can show targeted help text
 // instead of a generic "something went wrong" message.
@@ -162,16 +164,22 @@ export const chat = async (req, res, next) => {
           query: z.string(),
         }),
         execute: async ({ query }) => {
-          const data = await fetchWithRetry(
-            `https://api.themoviedb.org/3/search/movie?api_key=${process.env.TMDB_API_KEY}&query=${encodeURIComponent(query)}`,
-          ).then((res) => res.json());
-          // return only: id, title, release_date, overview from results.results
-          return data.results.map((movie) => ({
-            id: movie.id,
-            title: movie.title,
-            release_date: movie.release_date,
-            overview: movie.overview,
-          }));
+          const cacheKey = `tmdb:search:${query.toLowerCase()}`;
+          let results = await cache.get(cacheKey);
+          if (!results) {
+            const data = await fetchWithRetry(
+              `https://api.themoviedb.org/3/search/movie?api_key=${process.env.TMDB_API_KEY}&query=${encodeURIComponent(query)}`,
+            ).then((res) => res.json());
+            results = data.results.map((movie) => ({
+              id: movie.id,
+              title: movie.title,
+              release_date: movie.release_date,
+              overview: movie.overview,
+            }));
+            // 1 h — search results shift more often than individual movie details
+            await cache.set(cacheKey, results, 3_600);
+          }
+          return results;
         },
       }),
 
@@ -182,10 +190,14 @@ export const chat = async (req, res, next) => {
           movieId: z.string(),
         }),
         execute: async ({ movieId }) => {
-          const data = await fetchWithRetry(
-            `https://api.themoviedb.org/3/movie/${movieId}?api_key=${process.env.TMDB_API_KEY}`,
-          ).then((res) => res.json());
-          // return only: id, title, release_date, overview, runtime, genres
+          const cacheKey = `tmdb:movie:${movieId}`;
+          let data = await cache.get(cacheKey);
+          if (!data) {
+            data = await fetchWithRetry(
+              `https://api.themoviedb.org/3/movie/${movieId}?api_key=${process.env.TMDB_API_KEY}`,
+            ).then((res) => res.json());
+            await cache.set(cacheKey, data, 86_400); // 24 h
+          }
           return {
             id: data.id,
             title: data.title,
@@ -222,31 +234,6 @@ export const chat = async (req, res, next) => {
         },
       }),
 
-      get_now_showing: tool({
-        description:
-          "List movies currently showing in Christchurch cinemas (from scraped sessions). Use this to ground recommendations — at least one recommended movie must come from this list.",
-        // No inputs: it always returns the full now-showing set.
-        inputSchema: z.object({}),
-        execute: async () => {
-          const now = new Date();
-
-          const movies = await prisma.movie.findMany({
-            where: {
-              sessions: { some: { startsAt: { gt: now } } },
-              tmdbId: { not: null },
-            },
-            select: {
-              tmdbId: true,
-              title: true,
-              genres: true,
-              voteAverage: true,
-              overview: true,
-            },
-          });
-          return movies;
-        },
-      }),
-
       recommend_movies: tool({
         description:
           "Display recommended movies to the user as visual cards. Call this whenever you suggest specific films. For each movie pass its TMDB id and a short reason it fits the user's request — the reason is shown on the card.",
@@ -277,9 +264,16 @@ export const chat = async (req, res, next) => {
           const inTheatreIds = new Set(inTheatreMovies.map((m) => m.tmdbId));
           const cards = await Promise.all(
             recommendations.map(async ({ tmdbId, reason }) => {
-              const data = await fetchWithRetry(
-                `https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${process.env.TMDB_API_KEY}`,
-              ).then((r) => r.json());
+              const cacheKey = `tmdb:movie:${tmdbId}`;
+              let data = await cache.get(cacheKey);
+              if (!data) {
+                data = await fetchWithRetry(
+                  `https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${process.env.TMDB_API_KEY}`,
+                ).then((r) => r.json());
+                // Movie metadata (title, poster, runtime, genres) is stable —
+                // 24 h TTL keeps cards accurate without hammering the TMDB API.
+                await cache.set(cacheKey, data, 86_400);
+              }
               return {
                 tmdbId: data.id,
                 title: data.title,
@@ -302,6 +296,29 @@ export const chat = async (req, res, next) => {
       }),
     };
 
+    // Pre-fetch now-showing so the model gets it as context rather than spending
+    // a tool-call round-trip on get_now_showing. Cached for 5 min so every turn
+    // in the same window hits Redis instead of Postgres.
+    const NOW_SHOWING_CACHE_KEY = "now_showing";
+    let nowShowing = await cache.get(NOW_SHOWING_CACHE_KEY);
+    if (!nowShowing) {
+      const now = new Date();
+      nowShowing = await prisma.movie.findMany({
+        where: {
+          sessions: { some: { startsAt: { gt: now } } },
+          tmdbId: { not: null },
+        },
+        select: {
+          tmdbId: true,
+          title: true,
+          genres: true,
+          voteAverage: true,
+          overview: true,
+        },
+      });
+      await cache.set(NOW_SHOWING_CACHE_KEY, nowShowing, 300);
+    }
+
     // Abort the model run only if the client disconnects mid-stream. Wire this
     // to the *response* close (not req close, which fires as soon as the request
     // body is read) and guard on writableEnded so normal completion never aborts.
@@ -312,7 +329,7 @@ export const chat = async (req, res, next) => {
 
     const result = streamText({
       model: groq("openai/gpt-oss-120b"),
-      system: SYSTEM_PROMPT,
+      system: buildSystemPrompt(nowShowing),
       messages,
       tools,
       stopWhen: stepCountIs(8),
