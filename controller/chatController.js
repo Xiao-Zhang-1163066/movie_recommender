@@ -33,8 +33,11 @@ function buildSystemPrompt(nowShowing) {
   4. If nothing currently playing fits the request, say so honestly and recommend the closest
   real films that aren't in theatres — do not force an ill-fitting in-theatre pick.
 
-  Keep your text reply short and conversational (a sentence or two framing the picks). Do not
-  describe posters or ratings in prose — the card shows those.`;
+  Response format — follow this order every time:
+  1. Write your opening text first (1–2 short sentences framing the picks). Do not call any
+  tools before writing this — it must stream to the user immediately.
+  2. Then call recommend_movies in the same response.
+  Do not describe posters or ratings in prose — the card shows those.`;
 }
 
 // Classifies model-provider errors so the client can show targeted help text

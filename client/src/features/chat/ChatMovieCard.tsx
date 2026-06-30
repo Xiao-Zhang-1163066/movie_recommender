@@ -50,21 +50,21 @@ export default function ChatMovieCard({
             🎬
           </div>
         )}
+        <div
+          className="absolute top-2 left-2 text-xs font-bold px-1.5 py-0.5 rounded-md"
+          style={{ background: "rgba(0,0,0,0.75)", color: "var(--lime)" }}
+        >
+          ★ {rating}
+        </div>
         {/* "NOW SHOWING" badge */}
         {inTheatre && (
           <div
-            className="absolute top-2 left-2 text-xs font-bold px-1.5 py-0.5 rounded-md"
+            className="absolute bottom-2 left-2 text-xs font-bold px-1.5 py-0.5 rounded-md"
             style={{ background: "#c6f432", color: "#121212" }}
           >
             NOW SHOWING
           </div>
         )}
-        <div
-          className="absolute top-2 right-2 text-xs font-bold px-1.5 py-0.5 rounded-md"
-          style={{ background: "rgba(0,0,0,0.75)", color: "var(--lime)" }}
-        >
-          ★ {rating}
-        </div>
       </div>
 
       <p

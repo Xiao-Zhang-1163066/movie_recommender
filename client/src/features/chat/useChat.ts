@@ -13,6 +13,8 @@ export function useChat() {
   // They're separate from streamingText so errors don't bleed into the message history.
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [resetAt, setResetAt] = useState<Date | null>(null);
+  // true only for rate-limit errors where we must prevent sending until the window resets
+  const [sendBlocked, setSendBlocked] = useState(false);
 
   // useRef keeps the AbortController instance between renders without causing
   // re-renders when it changes — we only need it for its .abort() side-effect.
@@ -39,6 +41,7 @@ export function useChat() {
     setIsLoading(true);
     setErrorMessage(null);
     setResetAt(null);
+    setSendBlocked(false);
 
     // Fresh controller for this request — stored in ref so stopStream() can reach it.
     const controller = new AbortController();
@@ -107,14 +110,15 @@ export function useChat() {
         setInput(userInput);
         setErrorMessage(error.message);
         setResetAt(error.resetAt);
+        setSendBlocked(true);
         return; // finally still runs (clears loading state), but skip the commit block
       } else {
-        // Generic network / parse error — revert and surface a simple message.
+        // Generic network / parse error — revert so the user can retry immediately.
         setMessages(messages);
         setInput(userInput);
         setErrorMessage("Something went wrong. Please try again.");
         console.error("Chat error:", error);
-        return;
+        return; // sendBlocked stays false — the user can click Send to retry
       }
     } finally {
       // Always clean up streaming state and loading flag, regardless of outcome.
@@ -129,6 +133,7 @@ export function useChat() {
     // user message visible and commit any text that already streamed.
     if (modelRateLimitHit) {
       setErrorMessage("The AI service is busy — you've hit its rate limit. Please wait a moment before sending another message.");
+      setSendBlocked(true);
     }
 
     // Only commit if text arrived — movies without an explanation are
@@ -157,5 +162,6 @@ export function useChat() {
     stopStream,
     errorMessage,
     resetAt,
+    sendBlocked,
   };
 }

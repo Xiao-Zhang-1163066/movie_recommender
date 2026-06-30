@@ -52,7 +52,7 @@ export default function MovieCard({ movie }: { movie: MovieCardData }) {
           </div>
         )}
         <div
-          className="absolute top-2 right-2 text-xs font-bold px-1.5 py-0.5 rounded-md"
+          className="absolute top-2 left-2 text-xs font-bold px-1.5 py-0.5 rounded-md"
           style={{ background: "rgba(0,0,0,0.75)", color: "var(--lime)" }}
         >
           ★ {rating}

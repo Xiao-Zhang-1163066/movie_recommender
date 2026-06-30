@@ -22,6 +22,7 @@ type Props = {
   onStop: () => void;
   errorMessage?: string | null;
   resetAt?: Date | null;
+  sendBlocked?: boolean;
 };
 
 function ChatInput({
@@ -32,6 +33,7 @@ function ChatInput({
   isLoading,
   errorMessage,
   resetAt,
+  sendBlocked = false,
 }: Props) {
   return (
     <div
@@ -84,7 +86,7 @@ function ChatInput({
           <Button
             variant="lime"
             onClick={onSend}
-            disabled={!input.trim() || !!errorMessage}
+            disabled={!input.trim() || sendBlocked}
             className="px-5 py-2.5"
           >
             Send

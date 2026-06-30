@@ -14,6 +14,7 @@ function ChatPage() {
     stopStream,
     errorMessage,
     resetAt,
+    sendBlocked,
   } = useChat();
 
   return (
@@ -34,6 +35,7 @@ function ChatPage() {
         isLoading={isLoading}
         errorMessage={errorMessage}
         resetAt={resetAt}
+        sendBlocked={sendBlocked}
       />
     </div>
   );
