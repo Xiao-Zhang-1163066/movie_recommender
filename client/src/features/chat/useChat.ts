@@ -116,7 +116,7 @@ export function useChat() {
         // Generic network / parse error — revert so the user can retry immediately.
         setMessages(messages);
         setInput(userInput);
-        setErrorMessage("Something went wrong. Please try again.");
+        setErrorMessage(`Error: ${(error as Error).message}`);
         console.error("Chat error:", error);
         return; // sendBlocked stays false — the user can click Send to retry
       }
