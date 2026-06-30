@@ -22,4 +22,4 @@ export type Message = {
 export type StreamEvent =
   | { t: "text"; v: string }
   | { t: "movies"; v: ChatMovie[] }
-  | { t: "error"; v: string; kind?: "rate_limit" | "context_limit" | "general" };
+  | { t: "error"; v: string; kind?: "rate_limit" | "context_limit" | "general"; retryAfter?: number };

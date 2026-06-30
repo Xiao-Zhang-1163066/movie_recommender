@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ChatMovie, Message, StreamEvent } from "./types";
 import { postChatMessage, RateLimitError } from "@/services/chatService";
 import { useNavigate } from "react-router-dom";
@@ -17,6 +17,17 @@ export function useChat() {
   const [resetAt, setResetAt] = useState<Date | null>(null);
   // true only for rate-limit errors where we must prevent sending until the window resets
   const [sendBlocked, setSendBlocked] = useState(false);
+
+  // When the rate-limit window expires, auto-clear the banner and re-enable Send.
+  useEffect(() => {
+    if (!resetAt || !sendBlocked) return;
+    const timer = setTimeout(() => {
+      setErrorMessage(null);
+      setSendBlocked(false);
+      setResetAt(null);
+    }, Math.max(0, resetAt.getTime() - Date.now()));
+    return () => clearTimeout(timer);
+  }, [resetAt, sendBlocked]);
 
   // useRef keeps the AbortController instance between renders without causing
   // re-renders when it changes — we only need it for its .abort() side-effect.
@@ -52,6 +63,7 @@ export function useChat() {
     let assistantText = "";
     let assistantMovies: ChatMovie[] = [];
     let modelRateLimitHit = false;
+    let modelRetryAfter = 60;
 
     try {
       const response = await postChatMessage(
@@ -87,6 +99,7 @@ export function useChat() {
               // Stop reading — show the banner and disable send. Commit any
               // partial text that already streamed so it's not lost.
               modelRateLimitHit = true;
+              modelRetryAfter = event.retryAfter ?? 60;
               await reader.cancel();
               break outer;
             } else if (event.kind === "context_limit") {
@@ -139,7 +152,8 @@ export function useChat() {
     // Model-level rate limit: show the banner and disable send. We keep the
     // user message visible and commit any text that already streamed.
     if (modelRateLimitHit) {
-      setErrorMessage("The AI service is busy — you've hit its rate limit. Please wait a moment before sending another message.");
+      setErrorMessage("The AI service is busy — you've hit its rate limit.");
+      setResetAt(new Date(Date.now() + modelRetryAfter * 1000));
       setSendBlocked(true);
     }
 

@@ -57,8 +57,36 @@ function classifyModelError(err) {
   return "general";
 }
 
+// Groq embeds the retry window in the error message ("Try again in 42s", "in 1m30s",
+// "in 105ms") and sometimes in a retry-after header. Returns seconds until retry.
+function extractRetryAfter(err) {
+  const header = err?.responseHeaders?.["retry-after"] ?? err?.headers?.["retry-after"];
+  if (header) {
+    const secs = Number(header);
+    if (!isNaN(secs) && secs > 0) return Math.ceil(secs);
+  }
+  const combined = String(err?.message ?? "") + " " + String(err?.responseBody ?? "");
+
+  // Daily token limit — resets at midnight UTC
+  if (combined.includes("daily") || combined.includes("per day")) {
+    const now = new Date();
+    const midnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
+    return Math.ceil((midnight - now) / 1000);
+  }
+
+  const match = combined.match(/try again in (\d+(?:\.\d+)?)\s*(ms|s|m)?/i);
+  if (match) {
+    const value = parseFloat(match[1]);
+    const unit = (match[2] ?? "s").toLowerCase();
+    if (unit === "ms") return Math.max(1, Math.ceil(value / 1000));
+    if (unit === "m") return Math.ceil(value * 60);
+    return Math.ceil(value);
+  }
+  return 60;
+}
+
 const MODEL_ERROR_MESSAGES = {
-  rate_limit: "The AI service is busy — you've hit its rate limit. Please wait a moment before sending another message.",
+  rate_limit: "The AI service is temporarily at capacity. Please try again shortly.",
   context_limit: "This conversation is too long for me to continue. Please start a new chat.",
   general: "The assistant ran into a problem.",
 };
@@ -357,8 +385,9 @@ export const chat = async (req, res, next) => {
           // throwing — classify and forward so the client can show targeted help.
           console.error("Chat fullStream error part:", part.error);
           const kind = classifyModelError(part.error);
+          const retryAfter = kind === "rate_limit" ? extractRetryAfter(part.error) : undefined;
           res.write(
-            JSON.stringify({ t: "error", v: MODEL_ERROR_MESSAGES[kind], kind }) + "\n",
+            JSON.stringify({ t: "error", v: MODEL_ERROR_MESSAGES[kind], kind, retryAfter }) + "\n",
           );
         }
       }
@@ -366,8 +395,9 @@ export const chat = async (req, res, next) => {
       console.error("Chat stream error:", streamErr);
       if (!res.writableEnded) {
         const kind = classifyModelError(streamErr);
+        const retryAfter = kind === "rate_limit" ? extractRetryAfter(streamErr) : undefined;
         res.write(
-          JSON.stringify({ t: "error", v: MODEL_ERROR_MESSAGES[kind], kind }) + "\n",
+          JSON.stringify({ t: "error", v: MODEL_ERROR_MESSAGES[kind], kind, retryAfter }) + "\n",
         );
       }
     } finally {

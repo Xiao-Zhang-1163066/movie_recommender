@@ -30,10 +30,9 @@ export async function postChatMessage(
 
   if (!res.ok) {
     if (res.status === 429) {
-      // express-rate-limit sets RateLimit-Reset to an epoch timestamp in seconds
-      // (draft-6 header format, enabled by standardHeaders: true in chatLimiter.js).
+      // draft-6 RateLimit-Reset is seconds until reset (relative), not an epoch timestamp
       const resetHeader = res.headers.get("RateLimit-Reset");
-      const resetAt = resetHeader ? new Date(Number(resetHeader) * 1000) : null;
+      const resetAt = resetHeader ? new Date(Date.now() + Number(resetHeader) * 1000) : null;
       const data = await res.json().catch(() => ({}));
       throw new RateLimitError(data.error || "Rate limit exceeded", resetAt);
     }

@@ -1,15 +1,34 @@
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 
-// Converts the RateLimit-Reset timestamp into a human-readable suffix.
-// Returns "" once the window has already expired so stale text never shows.
-function formatResetTime(resetAt: Date | null): string {
-  if (!resetAt) return "";
-  const diffMs = resetAt.getTime() - Date.now();
-  if (diffMs <= 0) return "";
-  const mins = Math.ceil(diffMs / 60_000);
-  return mins <= 1
-    ? " Try again in a moment."
-    : ` Try again in ${mins} minutes.`;
+function useCountdown(resetAt: Date | null): string {
+  const [label, setLabel] = useState("");
+
+  useEffect(() => {
+    if (!resetAt) return;
+
+    const tick = () => {
+      const diffMs = resetAt.getTime() - Date.now();
+      if (diffMs <= 0) {
+        setLabel("");
+        return;
+      }
+      const totalSecs = Math.ceil(diffMs / 1000);
+      const mins = Math.floor(totalSecs / 60);
+      const secs = totalSecs % 60;
+      setLabel(
+        mins > 0
+          ? ` Try again in ${mins}:${String(secs).padStart(2, "0")}`
+          : ` Try again in ${totalSecs}s`,
+      );
+    };
+
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [resetAt]);
+
+  return label;
 }
 
 type Props = {
@@ -32,9 +51,11 @@ function ChatInput({
   onStop,
   isLoading,
   errorMessage,
-  resetAt,
+  resetAt = null,
   sendBlocked = false,
 }: Props) {
+  const countdown = useCountdown(resetAt);
+
   return (
     <div
       className="px-4 py-4"
@@ -51,7 +72,7 @@ function ChatInput({
           style={{ color: "var(--text-2)" }}
         >
           {errorMessage}
-          {formatResetTime(resetAt ?? null)}
+          {countdown}
         </p>
       )}
 
