@@ -37,6 +37,9 @@ export async function postChatMessage(
       const data = await res.json().catch(() => ({}));
       throw new RateLimitError(data.error || "Rate limit exceeded", resetAt);
     }
+    if (res.status === 401) {
+      throw new Error("SESSION_EXPIRED");
+    }
     const errorData = await res.json().catch(() => ({}));
     throw new Error(errorData.error || "Chat request failed");
   }

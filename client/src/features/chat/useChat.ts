@@ -1,8 +1,10 @@
 import { useRef, useState } from "react";
 import type { ChatMovie, Message, StreamEvent } from "./types";
 import { postChatMessage, RateLimitError } from "@/services/chatService";
+import { useNavigate } from "react-router-dom";
 
 export function useChat() {
+  const navigate = useNavigate();
   const [messages, setMessages] = useState<Message[]>([]);
   const [streamingText, setStreamingText] = useState("");
   const [streamingMovies, setStreamingMovies] = useState<ChatMovie[]>([]);
@@ -112,11 +114,16 @@ export function useChat() {
         setResetAt(error.resetAt);
         setSendBlocked(true);
         return; // finally still runs (clears loading state), but skip the commit block
+      } else if ((error as Error).message === "SESSION_EXPIRED") {
+        // Token is invalid or expired — clear it and send the user to login.
+        localStorage.removeItem("jwt");
+        navigate("/login", { replace: true });
+        return;
       } else {
         // Generic network / parse error — revert so the user can retry immediately.
         setMessages(messages);
         setInput(userInput);
-        setErrorMessage(`Error: ${(error as Error).message}`);
+        setErrorMessage("Something went wrong. Please try again.");
         console.error("Chat error:", error);
         return; // sendBlocked stays false — the user can click Send to retry
       }
