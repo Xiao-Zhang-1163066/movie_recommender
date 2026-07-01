@@ -64,6 +64,7 @@ export function useChat() {
     let assistantMovies: ChatMovie[] = [];
     let modelRateLimitHit = false;
     let modelRetryAfter = 60;
+    let modelRateLimitMessage = "The AI service is temporarily at capacity. Please try again shortly.";
 
     try {
       const response = await postChatMessage(
@@ -100,6 +101,13 @@ export function useChat() {
               // partial text that already streamed so it's not lost.
               modelRateLimitHit = true;
               modelRetryAfter = event.retryAfter ?? 60;
+              modelRateLimitMessage = event.v;
+              await reader.cancel();
+              break outer;
+            } else if (event.kind === "daily_limit") {
+              modelRateLimitHit = true;
+              modelRetryAfter = 0; // no countdown — message says "try again tomorrow"
+              modelRateLimitMessage = event.v;
               await reader.cancel();
               break outer;
             } else if (event.kind === "context_limit") {
@@ -152,8 +160,8 @@ export function useChat() {
     // Model-level rate limit: show the banner and disable send. We keep the
     // user message visible and commit any text that already streamed.
     if (modelRateLimitHit) {
-      setErrorMessage("The AI service is busy — you've hit its rate limit.");
-      setResetAt(new Date(Date.now() + modelRetryAfter * 1000));
+      setErrorMessage(modelRateLimitMessage);
+      if (modelRetryAfter > 0) setResetAt(new Date(Date.now() + modelRetryAfter * 1000));
       setSendBlocked(true);
     }
 

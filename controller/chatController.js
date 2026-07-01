@@ -49,6 +49,7 @@ function classifyModelError(err) {
   const status = err?.statusCode ?? err?.status;
 
   if (status === 429 || combined.includes("rate_limit") || combined.includes("rate limit")) {
+    if (combined.includes("daily") || combined.includes("per day")) return "daily_limit";
     return "rate_limit";
   }
   if (combined.includes("context length") || combined.includes("context window") || combined.includes("maximum context")) {
@@ -66,14 +67,6 @@ function extractRetryAfter(err) {
     if (!isNaN(secs) && secs > 0) return Math.ceil(secs);
   }
   const combined = String(err?.message ?? "") + " " + String(err?.responseBody ?? "");
-
-  // Daily token limit — resets at midnight UTC
-  if (combined.includes("daily") || combined.includes("per day")) {
-    const now = new Date();
-    const midnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
-    return Math.ceil((midnight - now) / 1000);
-  }
-
   const match = combined.match(/try again in (\d+(?:\.\d+)?)\s*(ms|s|m)?/i);
   if (match) {
     const value = parseFloat(match[1]);
@@ -87,6 +80,7 @@ function extractRetryAfter(err) {
 
 const MODEL_ERROR_MESSAGES = {
   rate_limit: "The AI service is temporarily at capacity. Please try again shortly.",
+  daily_limit: "The AI service has reached its daily limit. Please try again tomorrow.",
   context_limit: "This conversation is too long for me to continue. Please start a new chat.",
   general: "The assistant ran into a problem.",
 };
