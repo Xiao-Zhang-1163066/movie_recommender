@@ -22,6 +22,7 @@ model User {
 
   movies   Movie[]  @relation("MovieCreator") // Relation to movies created by the user
   watchlistItems WatchlistItem[]
+  conversations Conversation[]
 }
 
 model Movie {
@@ -115,7 +116,63 @@ model Cinema {
   cinema          Cinema     @relation(fields: [cinemaId], references: [id], onDelete: Cascade)
   // relation back to Movie
   movie           Movie      @relation(fields: [movieId], references: [id], onDelete: Cascade)
-  // indexes for fast lookups 
+  // indexes for fast lookups
   @@index([movieId, startsAt])
   @@index([cinemaId, startsAt])
+}
+
+// One chat thread between a user and the agent. Before this model the whole
+// conversation lived in React state and was re-sent on every request, so a
+// refresh lost it and context grew without bound.
+model Conversation {
+  id             String   @id @default(uuid())
+  userId         String
+  // Taken from the first user message and truncated — no LLM call, so creating
+  // a conversation stays a single cheap insert.
+  title          String?
+  // Rolling summary of every turn that has fallen outside the verbatim window.
+  // One conversation only ever has one current summary, and superseded summaries
+  // have no value once folded in, so this is a column rather than its own table.
+  summary        String?
+  // Watermark: the highest seq already folded into `summary`. Summarisation
+  // reads only rows above it, which is what makes a repeated run harmless.
+  summarizedUpTo Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages ChatMessage[]
+
+  // Drives the "recent conversations" list, which reads by owner and sorts by recency.
+  @@index([userId, updatedAt])
+}
+
+model ChatMessage {
+  id             String   @id @default(uuid())
+  conversationId String
+  role           ChatRole
+  content        String
+  // recommend_movies card payload for assistant turns, null for user turns.
+  // It is a TMDB snapshot that is only ever read and rendered whole — never
+  // queried or joined — so jsonb beats a normalised table here.
+  movies         Json?
+  // Ordering key, monotonic within a conversation. createdAt is not enough:
+  // the user and assistant rows of one turn can share a timestamp, and clocks
+  // can move backwards. An explicit integer also gives the summary watermark
+  // something simple to point at.
+  seq            Int
+  createdAt      DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  // Guards against two concurrent writes claiming the same position. The unique
+  // constraint is itself a btree index on (conversationId, seq), so it also
+  // serves "load this conversation in order" — a separate @@index would be
+  // redundant and would cost an extra tree to maintain on every insert.
+  @@unique([conversationId, seq])
+}
+
+enum ChatRole {
+  USER
+  ASSISTANT
 }
