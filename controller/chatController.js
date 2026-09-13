@@ -17,6 +17,7 @@ import {
   loadHistory,
   appendMessage,
   buildModelMessages,
+  buildClientMessages,
 } from "../services/conversationService.js";
 
 // Step 1: create the AI provider
@@ -304,6 +305,38 @@ export const chat = async (req, res, next) => {
         }
       }
     }
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * GET /chat/:conversationId
+ *
+ * Rebuilds a conversation after a refresh, or when a link to one is opened.
+ * Without this the id in the URL would be useless: the browser would know which
+ * thread it is in but have nothing to show for it.
+ */
+export const getConversation = async (req, res, next) => {
+  try {
+    // The id is always present on this route, so this never creates anything.
+    // It is reused for the ownership check, which is the part that matters here.
+    const conversation = await getOrCreateConversation(
+      req.user.id,
+      req.params.conversationId,
+    );
+    const rows = await loadHistory(conversation.id);
+
+    res.status(200).json({
+      status: "success",
+      data: {
+        conversation: {
+          id: conversation.id,
+          title: conversation.title,
+          messages: buildClientMessages(rows),
+        },
+      },
+    });
   } catch (err) {
     next(err);
   }

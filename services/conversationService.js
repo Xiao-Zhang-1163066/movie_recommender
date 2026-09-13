@@ -108,3 +108,20 @@ export function buildModelMessages(rows) {
     content: row.content,
   }));
 }
+
+/**
+ * Reshape stored rows for the browser.
+ *
+ * Deliberately not the same as buildModelMessages. The UI needs the row id to
+ * use as a React key and the movie cards to render, while the model is sent
+ * neither: ids mean nothing to it, and the card details are already in the text
+ * it wrote. Merging the two would push wasted tokens into every request.
+ */
+export function buildClientMessages(rows) {
+  return rows.map((row) => ({
+    id: row.id,
+    role: row.role === "USER" ? "user" : "assistant",
+    content: row.content,
+    movies: row.movies ?? undefined,
+  }));
+}

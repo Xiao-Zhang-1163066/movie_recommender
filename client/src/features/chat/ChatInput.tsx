@@ -106,7 +106,10 @@ function ChatInput({
         ) : (
           <Button
             variant="lime"
-            onClick={onSend}
+            // Wrapped, not passed directly: onClick hands the callback a React
+            // event, which sendMessage would take as its `override` text and
+            // then crash calling .trim() on it.
+            onClick={() => onSend()}
             disabled={!input.trim() || sendBlocked}
             className="px-5 py-2.5"
           >

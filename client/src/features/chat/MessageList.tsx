@@ -126,7 +126,10 @@ function MessageList({
 
         {messages.map((m, i) => (
           <div
-            key={i}
+            // Stored messages carry a database id, which is a stable identity.
+            // The index is only a fallback for a message the user has just typed
+            // and which the server has not yet handed back with an id.
+            key={m.id ?? i}
             className={`flex flex-col ${
               m.role === "user"
                 ? "self-end items-end"

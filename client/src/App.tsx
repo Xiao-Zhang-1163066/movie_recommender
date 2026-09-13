@@ -29,6 +29,9 @@ function App() {
             <Route path="/cinemas/:slug" element={<CinemaDetailPage />} />
             <Route element={<ProtectedRoute />}>
               <Route path="/chat" element={<ChatPage />} />
+              {/* Same page, but the id tells it which stored thread to load,
+                  which is what lets a refresh or a shared link restore a chat. */}
+              <Route path="/chat/:conversationId" element={<ChatPage />} />
               <Route path="/watchlist" element={<WatchlistPage />} />
             </Route>
           </Route>
