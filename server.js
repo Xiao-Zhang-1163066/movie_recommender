@@ -1,56 +1,22 @@
-import express from "express";
 import { config } from "dotenv";
 import { connectDB, disconnectDB } from "./config/db.js";
-import cookieParser from "cookie-parser";
-import cors from "cors";
-// Import routes
-import movieRoutes from "./routes/movieRoutes.js";
-import authRoutes from "./routes/authRoutes.js";
-import watchlistRoutes from "./routes/watchlistRoutes.js";
-import cinemaRoutes from "./routes/cinemaRoutes.js";
-import sessionRoutes from "./routes/sessionRoutes.js";
-import chatRoutes from "./routes/chatRoutes.js";
+import app from "./app.js";
 
 config();
 connectDB();
 
-const app = express();
-// Middleware to parse JSON bodies
-app.use(express.json());
-
-// Middleware to parse cookies
-app.use(cookieParser());
-
-// CORS middleware
-app.use(
-  cors({
-    origin: process.env.CORS_ORIGIN || "http://localhost:5173",
-    credentials: true, // Allow cookies to be sent with requests
-  }),
-);
-
-// api routes
-app.use("/api/auth", authRoutes);
-app.use("/api/movies", movieRoutes);
-app.use("/api/watchlist", watchlistRoutes);
-app.use("/api/cinemas", cinemaRoutes);
-app.use("/api/sessions", sessionRoutes);
-app.use("/api/chat", chatRoutes);
-
 const port = process.env.PORT || 3000;
 
-app.get("/", (req, res) => {
-  res.send("Hello World!???");
-});
-
-app.listen(port, () => {
+// Keep the http.Server handle — the shutdown handlers below need it to stop
+// accepting connections before the process exits.
+const server = app.listen(port, () => {
   console.log(`Example app listening at http://localhost:${port}`);
 });
 
 // Handle unhandled promise rejections (e.g., database connection errors)
 process.on("unhandledRejection", (error) => {
   console.error("Unhandled Rejection:", error);
-  server.close(async (error) => {
+  server.close(async () => {
     await disconnectDB();
     process.exit(1);
   });

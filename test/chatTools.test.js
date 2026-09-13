@@ -1,41 +1,35 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
-// We can't import the tools directly because they're defined inside the chat()
-// function. So we'll test the *logic* by writing a small helper that mirrors
-// what the search_movies tool does. This is a common pattern when functions
-// aren't exported — extract the logic, test the logic.
+// chatTools.js defaults its dependencies to the real Prisma and Redis clients.
+// Every test below injects fakes, so those defaults are never called — but the
+// import alone would construct a Prisma client and read the generated client off
+// disk. Stubbing the modules keeps this file a true unit test with no
+// filesystem or connection prerequisites.
+vi.mock("../config/db.js", () => ({ prisma: {}, connectDB: vi.fn(), disconnectDB: vi.fn() }));
+vi.mock("../config/redis.js", () => ({
+  cache: { get: vi.fn(), set: vi.fn(), del: vi.fn() },
+}));
 
-// Step 1: write a function called searchMovies that accepts a query string and
-// a fetch function (we'll pass in a fake one during tests).
-// It should call fetch with a TMDB search URL and return an array of objects
-// with: id, title, release_date, overview.
-// (Mirror the logic in chatController.js lines 116-127)
+const { searchMovies, getTasteProfile, markWatched } = await import(
+  "../controller/chatTools.js"
+);
 
-async function searchMovies(query, fetchFn) {
-  // your code here
-  const fakeApiKey = "FAKE_API_KEY_FOR_TESTING";
-  const data = await fetchFn(
-    `https://api.themoviedb.org/3/search/movie?api_key=${fakeApiKey}&query=${encodeURIComponent(query)}`,
-  ).then((res) => res.json());
-  // return only: id, title, release_date, overview from results.results
-  return data.results.map((movie) => ({
-    id: movie.id,
-    title: movie.title,
-    release_date: movie.release_date,
-    overview: movie.overview,
-  }));
+// These import the real tool implementations that chatController.js runs.
+// An earlier version of this file re-implemented each function locally because
+// the tools were closures inside chat() and could not be imported. Those tests
+// passed whatever the controller did — they were testing a copy. Every
+// dependency below is injected through the options object instead.
+
+// A cache stub that always misses, so the TMDB path is the one under test.
+function missingCache() {
+  return { get: vi.fn().mockResolvedValue(null), set: vi.fn() };
 }
 
-// Step 2: describe block groups related tests together — think of it as a label
 describe("searchMovies tool", () => {
-  // Step 3: write a test that:
-  //   - creates a fake fetch function (vi.fn()) that returns a fake TMDB response
-  //   - calls searchMovies with that fake fetch
-  //   - checks that the returned array has the right shape
-
   it("returns mapped movie objects from TMDB response", async () => {
-    // create a fake fetch — vi.fn() makes a mock function
     const fakeFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
       json: () =>
         Promise.resolve({
           results: [
@@ -44,16 +38,18 @@ describe("searchMovies tool", () => {
               title: "Test Movie",
               release_date: "2024-01-01",
               overview: "A great film",
-              poster_path: "/abc.jpg", // extra field — your tool should ignore this
+              poster_path: "/abc.jpg", // extra field — the tool should drop this
             },
           ],
         }),
     });
 
-    // call your function with the fake fetch
-    const results = await searchMovies("test query", fakeFetch);
+    const results = await searchMovies("test query", {
+      fetchFn: fakeFetch,
+      cache: missingCache(),
+      apiKey: "test-key",
+    });
 
-    // check the results — fill in the expected values
     expect(results).toHaveLength(1);
     expect(results[0]).toEqual({
       id: 123,
@@ -62,37 +58,46 @@ describe("searchMovies tool", () => {
       overview: "A great film",
     });
   });
-});
 
-// Mirror the get_taste_profile tool logic — accepts a userId and a prisma instance
-async function getTasteProfile(userId, prisma) {
-  // step 1: query prisma.watchlistItem.findMany for COMPLETED items where rating is not null
-  // include: { movie: true }
+  it("url-encodes the query so titles with spaces and symbols reach TMDB intact", async () => {
+    const fakeFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ results: [] }),
+    });
 
-  // step 2: return an object with:
-  //   ratingCount: number of watched movies
-  //   avgRating: average rating, or null if none
-  //   recentRatings: last 5 items mapped to { title, rating }
-  const watchedMovies = await prisma.watchlistItem.findMany({
-    where: { userId, status: "COMPLETED", rating: { not: null } },
-    include: { movie: true },
+    await searchMovies("Am I OK?", {
+      fetchFn: fakeFetch,
+      cache: missingCache(),
+      apiKey: "test-key",
+    });
+
+    // A mock ignores its arguments, so asserting on the return value alone would
+    // never catch a malformed URL. Inspect the call instead.
+    const [calledUrl] = fakeFetch.mock.calls[0];
+    expect(calledUrl).toContain("query=Am%20I%20OK%3F");
   });
-  return {
-    ratingCount: watchedMovies.length,
-    avgRating: watchedMovies.length
-      ? watchedMovies.reduce((acc, item) => acc + item.rating, 0) /
-        watchedMovies.length
-      : null,
-    recentRatings: watchedMovies.slice(-5).map((item) => ({
-      title: item.movie.title,
-      rating: item.rating,
-    })),
-  };
-}
+
+  it("serves a cache hit without calling TMDB", async () => {
+    const cached = [{ id: 1, title: "Cached", release_date: "", overview: "" }];
+    const cache = { get: vi.fn().mockResolvedValue(cached), set: vi.fn() };
+    const fakeFetch = vi.fn();
+
+    const results = await searchMovies("anything", {
+      fetchFn: fakeFetch,
+      cache,
+      apiKey: "test-key",
+    });
+
+    expect(results).toEqual(cached);
+    expect(fakeFetch).not.toHaveBeenCalled();
+    expect(cache.set).not.toHaveBeenCalled();
+  });
+});
 
 describe("getTasteProfile tool", () => {
   it("calculates average rating correctly", async () => {
-    const fakePrisma = {
+    const prisma = {
       watchlistItem: {
         findMany: vi.fn().mockResolvedValue([
           { rating: 8, movie: { title: "Film A" } },
@@ -102,61 +107,71 @@ describe("getTasteProfile tool", () => {
       },
     };
 
-    const result = await getTasteProfile("user-123", fakePrisma);
+    const result = await getTasteProfile("user-123", { prisma });
 
     expect(result.ratingCount).toBe(3);
     expect(result.avgRating).toBe(8);
+    expect(result.recentRatings).toEqual([
+      { title: "Film A", rating: 8 },
+      { title: "Film B", rating: 6 },
+      { title: "Film C", rating: 10 },
+    ]);
   });
 
   it("returns null avgRating when no movies watched", async () => {
-    const fakePrisma = {
-      watchlistItem: {
-        findMany: vi.fn().mockResolvedValue([]),
-      },
+    const prisma = {
+      watchlistItem: { findMany: vi.fn().mockResolvedValue([]) },
     };
 
-    const result = await getTasteProfile("user-123", fakePrisma);
+    const result = await getTasteProfile("user-123", { prisma });
 
     expect(result.ratingCount).toBe(0);
     expect(result.avgRating).toBe(null);
+    expect(result.recentRatings).toEqual([]);
+  });
+
+  it("scopes the query to the requesting user and to rated, completed items", async () => {
+    const prisma = {
+      watchlistItem: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+
+    await getTasteProfile("user-123", { prisma });
+
+    // Dropping any part of this where clause would leak another user's ratings
+    // into the taste profile, or average in unrated rows as if they were zero.
+    expect(prisma.watchlistItem.findMany).toHaveBeenCalledWith({
+      where: { userId: "user-123", status: "COMPLETED", rating: { not: null } },
+      include: { movie: true },
+    });
   });
 });
 
-async function markWatched(userId, movieId, rating, notes, prisma) {
-  await prisma.watchlistItem.upsert({
-    where: { userId_movieId: { userId, movieId } },
-    update: { status: "COMPLETED", rating, notes },
-    create: { userId, movieId, status: "COMPLETED", rating, notes },
-  });
-  return { success: true };
-}
-
 describe("markWatched tool", () => {
   it("calls upsert with correct arguments and returns success", async () => {
-    const fakePrisma = {
-      watchlistItem: {
-        upsert: vi.fn().mockResolvedValue({}),
-      },
+    const prisma = {
+      watchlistItem: { upsert: vi.fn().mockResolvedValue({}) },
     };
 
+    // movieId is a uuid string — WatchlistItem.movieId is String in the Prisma
+    // schema and the tool's inputSchema is z.string().
     const result = await markWatched(
       "user-123",
-      456,
+      "movie-456",
       9,
       "Loved it!",
-      fakePrisma,
+      { prisma },
     );
 
-    // check the return value
     expect(result).toEqual({ success: true });
 
-    // check that upsert was called with the right shape
-    expect(fakePrisma.watchlistItem.upsert).toHaveBeenCalledWith({
-      where: { userId_movieId: { userId: "user-123", movieId: 456 } },
+    // upsert returns nothing useful, so the call arguments are the only thing
+    // that proves the write was correct.
+    expect(prisma.watchlistItem.upsert).toHaveBeenCalledWith({
+      where: { userId_movieId: { userId: "user-123", movieId: "movie-456" } },
       update: { status: "COMPLETED", rating: 9, notes: "Loved it!" },
       create: {
         userId: "user-123",
-        movieId: 456,
+        movieId: "movie-456",
         status: "COMPLETED",
         rating: 9,
         notes: "Loved it!",

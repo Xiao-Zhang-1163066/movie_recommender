@@ -4,15 +4,15 @@
  *  1. Now-showing pre-fetch: Postgres query vs Redis cache hit
  *  2. TMDB movie detail fetch: live HTTP call vs Redis cache hit
  *
- * Run with: npx vitest run test/chatPerf.test.js
+ * Run with: npm run test:perf   (or: npx vitest run --dir test/perf)
  * Requires: server NOT needed — hits DB and Redis directly.
  *           REDIS_URL must be set (or Redis calls silently no-op).
  *           TMDB_API_KEY must be set for the cold-path TMDB benchmark.
  */
 
 import { describe, it, beforeAll, afterAll } from "vitest";
-import { cache } from "../config/redis.js";
-import { prisma } from "../config/db.js";
+import { cache } from "../../config/redis.js";
+import { prisma } from "../../config/db.js";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 

@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - server.js
+      - app.js
       - routes/**
       - controller/**
       - middleware/**
@@ -13,6 +14,8 @@ on:
       - utils/**
       - config/**
       - prisma/**
+      - test/**
+      - vitest.config.js
       - Dockerfile
       - package*.json
 
@@ -21,6 +24,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # Tests gate the deploy: they run before the image is built, so a failure
+      # stops the release rather than shipping and rolling back. No secrets are
+      # needed — test/setup.js clears the database and Redis URLs, and the suite
+      # mocks both clients.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      # generated/prisma is gitignored, so the client has to be built from the
+      # schema before anything can import config/db.js.
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Run tests
+        run: npm test
 
       - name: Log in to Azure Container Registry
         uses: docker/login-action@v3

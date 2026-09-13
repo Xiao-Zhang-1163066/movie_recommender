@@ -1,9 +1,23 @@
 import { streamText, tool, stepCountIs } from "ai";
 // import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { z } from "zod";
-import { prisma } from "../config/db.js";
 import { createGroq } from "@ai-sdk/groq";
-import { cache } from "../config/redis.js";
+import {
+  getUserWatchlist,
+  getTasteProfile,
+  markWatched,
+  searchMovies,
+  getMovieDetails,
+  getShowtimes,
+  recommendMovies,
+  getNowShowing,
+} from "./chatTools.js";
+import {
+  getOrCreateConversation,
+  loadHistory,
+  appendMessage,
+  buildModelMessages,
+} from "../services/conversationService.js";
 
 // Step 1: create the AI provider
 // const google = createGoogleGenerativeAI({
@@ -13,8 +27,6 @@ import { cache } from "../config/redis.js";
 const groq = createGroq({
   apiKey: process.env.GROQ_API_KEY,
 });
-
-const TMDB_IMG_BASE = "https://image.tmdb.org/t/p/w500";
 
 function buildSystemPrompt(nowShowing) {
   return `You are AI Movie Mate, a concierge that recommends films to users in
@@ -85,45 +97,31 @@ const MODEL_ERROR_MESSAGES = {
   general: "The assistant ran into a problem.",
 };
 
-// Wraps fetch with a per-request timeout and exponential-backoff retries.
-// Only retries on network errors and 5xx responses — 4xx are caller errors and
-// should surface immediately rather than burning quota retrying a bad request.
-async function fetchWithRetry(url, { maxAttempts = 3, timeoutMs = 8_000 } = {}) {
-  let lastError;
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const res = await fetch(url, { signal: controller.signal });
-      if (res.ok) return res;
-      if (res.status < 500) throw new Error(`TMDB ${res.status}`); // don't retry 4xx
-      lastError = new Error(`TMDB ${res.status}`);
-    } catch (err) {
-      lastError = err; // network error or timeout — fall through to retry
-    } finally {
-      clearTimeout(timer);
-    }
-    if (attempt < maxAttempts) {
-      // 500 ms → 1 000 ms backoff
-      await new Promise((r) => setTimeout(r, 500 * 2 ** (attempt - 1)));
-    }
-  }
-  throw lastError;
-}
-
 /**
  * POST /chat
- * Body: { messages: [{ role, content }] }
+ * Body: { conversationId?: string, message: string }
+ *
+ * The client used to post its whole message array back on every turn. History
+ * now lives in Postgres, so a request only says which thread it is in and what
+ * the user just typed. That makes a conversation survive a refresh and stops
+ * the client from being able to dictate what the model is told it said.
  *
  * Streams a custom NDJSON protocol — one JSON object per line:
+ *   { "t": "conversation", "v": { id, title } }        always first, so a new
+ *                                                      chat learns its own id
  *   { "t": "text",   "v": "<delta>" }                 incremental assistant text
  *   { "t": "movies", "v": [ ...cards ] }              a recommend_movies result
  *   { "t": "error",  "v": "<message>", "kind": "..." } a stream-level error
  */
 export const chat = async (req, res, next) => {
   try {
-    const { messages } = req.body;
+    const { conversationId, message } = req.body;
     const userId = req.user.id;
+
+    // The schema trims before checking the length, but validate() throws the
+    // parsed value away and hands the controller the raw body, so the trim has
+    // to happen again here for the version that gets stored and sent.
+    const userMessage = message.trim();
 
     const tools = {
       get_user_watchlist: tool({
@@ -134,35 +132,13 @@ export const chat = async (req, res, next) => {
             .enum(["PLANNED", "WATCHING", "COMPLETED", "DROPPED"])
             .optional(),
         }),
-        execute: async ({ status }) => {
-          const watchlist = await prisma.watchlistItem.findMany({
-            where: { userId, ...(status ? { status } : {}) },
-            include: { movie: true },
-          });
-          return watchlist;
-        },
+        execute: async ({ status }) => getUserWatchlist(userId, status),
       }),
       get_taste_profile: tool({
         description:
           "Get a summary of the user's movie taste based on their watched and rated movies",
         inputSchema: z.object({}),
-        execute: async () => {
-          const watchedMovies = await prisma.watchlistItem.findMany({
-            where: { userId, status: "COMPLETED", rating: { not: null } },
-            include: { movie: true },
-          });
-          return {
-            ratingCount: watchedMovies.length,
-            avgRating: watchedMovies.length
-              ? watchedMovies.reduce((acc, item) => acc + item.rating, 0) /
-                watchedMovies.length
-              : null,
-            recentRatings: watchedMovies.slice(-5).map((item) => ({
-              title: item.movie.title,
-              rating: item.rating,
-            })),
-          };
-        },
+        execute: async () => getTasteProfile(userId),
       }),
       mark_watched: tool({
         description:
@@ -172,15 +148,8 @@ export const chat = async (req, res, next) => {
           rating: z.number().min(1).max(10).optional(),
           notes: z.string().optional(),
         }),
-        execute: async ({ movieId, rating, notes }) => {
-          // upsert a WatchlistItem: where userId+movieId, update status=COMPLETED+rating+notes, create if not exists
-          await prisma.watchlistItem.upsert({
-            where: { userId_movieId: { userId, movieId } }, // The WatchlistItem schema has @@unique([userId, movieId]), which Prisma exposes as a compound key called userId_movieId. The where for upsert must use it
-            update: { status: "COMPLETED", rating, notes },
-            create: { userId, movieId, status: "COMPLETED", rating, notes },
-          });
-          return { success: true };
-        },
+        execute: async ({ movieId, rating, notes }) =>
+          markWatched(userId, movieId, rating, notes),
       }),
 
       search_movies: tool({
@@ -188,24 +157,7 @@ export const chat = async (req, res, next) => {
         inputSchema: z.object({
           query: z.string(),
         }),
-        execute: async ({ query }) => {
-          const cacheKey = `tmdb:search:${query.toLowerCase()}`;
-          let results = await cache.get(cacheKey);
-          if (!results) {
-            const data = await fetchWithRetry(
-              `https://api.themoviedb.org/3/search/movie?api_key=${process.env.TMDB_API_KEY}&query=${encodeURIComponent(query)}`,
-            ).then((res) => res.json());
-            results = data.results.map((movie) => ({
-              id: movie.id,
-              title: movie.title,
-              release_date: movie.release_date,
-              overview: movie.overview,
-            }));
-            // 1 h — search results shift more often than individual movie details
-            await cache.set(cacheKey, results, 3_600);
-          }
-          return results;
-        },
+        execute: async ({ query }) => searchMovies(query),
       }),
 
       get_movie_details: tool({
@@ -214,25 +166,9 @@ export const chat = async (req, res, next) => {
         inputSchema: z.object({
           movieId: z.string(),
         }),
-        execute: async ({ movieId }) => {
-          const cacheKey = `tmdb:movie:${movieId}`;
-          let data = await cache.get(cacheKey);
-          if (!data) {
-            data = await fetchWithRetry(
-              `https://api.themoviedb.org/3/movie/${movieId}?api_key=${process.env.TMDB_API_KEY}`,
-            ).then((res) => res.json());
-            await cache.set(cacheKey, data, 86_400); // 24 h
-          }
-          return {
-            id: data.id,
-            title: data.title,
-            release_date: data.release_date,
-            overview: data.overview,
-            runtime: data.runtime,
-            genres: data.genres.map((g) => g.name),
-          };
-        },
+        execute: async ({ movieId }) => getMovieDetails(movieId),
       }),
+
       get_showtimes: tool({
         description:
           "Get cinema showtimes for a specific movie, optionally filtered by date (YYYY-MM-DD format)",
@@ -240,23 +176,7 @@ export const chat = async (req, res, next) => {
           movieId: z.string(),
           date: z.string().optional(),
         }),
-        execute: async ({ movieId, date }) => {
-          // build a where clause: always filter by movieId
-
-          // if date is provided, filter startsAt >= start of that day and < start of next day
-          const where = { movieId };
-          if (date) {
-            const startDate = new Date(date);
-            const endDate = new Date(startDate);
-            endDate.setDate(endDate.getDate() + 1);
-            where.startsAt = { gte: startDate, lt: endDate };
-          }
-          const sessions = await prisma.session.findMany({
-            where,
-            include: { cinema: true },
-          });
-          return sessions;
-        },
+        execute: async ({ movieId, date }) => getShowtimes(movieId, date),
       }),
 
       recommend_movies: tool({
@@ -274,75 +194,24 @@ export const chat = async (req, res, next) => {
             }),
           ),
         }),
-        execute: async ({ recommendations }) => {
-          // Enrich each id into a card payload from TMDB so poster / rating /
-          // runtime are always accurate (never invented by the model).
-          const now = new Date();
-          const tmdbIds = recommendations.map((r) => r.tmdbId);
-          const inTheatreMovies = await prisma.movie.findMany({
-            where: {
-              tmdbId: { in: tmdbIds },
-              sessions: { some: { startsAt: { gt: now } } },
-            },
-            select: { tmdbId: true },
-          });
-          const inTheatreIds = new Set(inTheatreMovies.map((m) => m.tmdbId));
-          const cards = await Promise.all(
-            recommendations.map(async ({ tmdbId, reason }) => {
-              const cacheKey = `tmdb:movie:${tmdbId}`;
-              let data = await cache.get(cacheKey);
-              if (!data) {
-                data = await fetchWithRetry(
-                  `https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${process.env.TMDB_API_KEY}`,
-                ).then((r) => r.json());
-                // Movie metadata (title, poster, runtime, genres) is stable —
-                // 24 h TTL keeps cards accurate without hammering the TMDB API.
-                await cache.set(cacheKey, data, 86_400);
-              }
-              return {
-                tmdbId: data.id,
-                title: data.title,
-                releaseYear: data.release_date
-                  ? Number(data.release_date.slice(0, 4))
-                  : null,
-                runtime: data.runtime ?? null,
-                voteAverage: data.vote_average ?? null,
-                posterUrl: data.poster_path
-                  ? `${TMDB_IMG_BASE}${data.poster_path}`
-                  : null,
-                overview: data.overview ?? null,
-                reason: reason,
-                inTheatre: inTheatreIds.has(tmdbId),
-              };
-            }),
-          );
-          return cards;
-        },
+        execute: async ({ recommendations }) =>
+          recommendMovies(recommendations),
       }),
     };
 
+    // Resolve the thread and store the user's turn *before* the model is called.
+    // If Groq is down, or the process dies mid-request, what the person typed is
+    // already safe. Saving both turns at the end would lose it.
+    // Any failure here still happens before the NDJSON header is set, so it can
+    // be reported as ordinary JSON by the error handler.
+    const conversation = await getOrCreateConversation(userId, conversationId, userMessage);
+    await appendMessage(conversation.id, { role: "USER", content: userMessage });
+
+    const modelMessages = buildModelMessages(await loadHistory(conversation.id));
+
     // Pre-fetch now-showing so the model gets it as context rather than spending
-    // a tool-call round-trip on get_now_showing. Cached for 5 min so every turn
-    // in the same window hits Redis instead of Postgres.
-    const NOW_SHOWING_CACHE_KEY = "now_showing";
-    let nowShowing = await cache.get(NOW_SHOWING_CACHE_KEY);
-    if (!nowShowing) {
-      const now = new Date();
-      nowShowing = await prisma.movie.findMany({
-        where: {
-          sessions: { some: { startsAt: { gt: now } } },
-          tmdbId: { not: null },
-        },
-        select: {
-          tmdbId: true,
-          title: true,
-          genres: true,
-          voteAverage: true,
-          overview: true,
-        },
-      });
-      await cache.set(NOW_SHOWING_CACHE_KEY, nowShowing, 300);
-    }
+    // a tool-call round-trip on get_now_showing.
+    const nowShowing = await getNowShowing();
 
     // Abort the model run only if the client disconnects mid-stream. Wire this
     // to the *response* close (not req close, which fires as soon as the request
@@ -352,27 +221,45 @@ export const chat = async (req, res, next) => {
       if (!res.writableEnded) controller.abort();
     });
 
+    // Stream our own NDJSON protocol off the SDK's fullStream so we can carry
+    // both text deltas and structured recommend_movies cards on one connection.
+    res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+
+    // Announce the thread before anything else. A brand-new chat only learns its
+    // id here, and it needs it to put the id in the URL and to send a follow-up
+    // message into the same thread.
+    res.write(
+      JSON.stringify({
+        t: "conversation",
+        v: { id: conversation.id, title: conversation.title },
+      }) + "\n",
+    );
+
     const result = streamText({
       model: groq("openai/gpt-oss-120b"),
       system: buildSystemPrompt(nowShowing),
-      messages,
+      messages: modelMessages,
       tools,
       stopWhen: stepCountIs(8),
       abortSignal: controller.signal,
     });
 
-    // Stream our own NDJSON protocol off the SDK's fullStream so we can carry
-    // both text deltas and structured recommend_movies cards on one connection.
-    res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+    // Accumulated alongside the writes so the finished turn can be stored. Until
+    // now only the browser kept a running copy of the reply.
+    let assistantText = "";
+    let assistantMovies = [];
+
     try {
       for await (const part of result.fullStream) {
         if (res.writableEnded) break;
         if (part.type === "text-delta") {
+          assistantText += part.text;
           res.write(JSON.stringify({ t: "text", v: part.text }) + "\n");
         } else if (
           part.type === "tool-result" &&
           part.toolName === "recommend_movies"
         ) {
+          assistantMovies.push(...part.output);
           res.write(JSON.stringify({ t: "movies", v: part.output }) + "\n");
         } else if (part.type === "error") {
           // The SDK surfaces model/tool failures as a stream part rather than
@@ -396,6 +283,26 @@ export const chat = async (req, res, next) => {
       }
     } finally {
       if (!res.writableEnded) res.end();
+
+      // Store the reply after the response is closed, so the database write
+      // never delays what the user sees. Running in finally means a stream cut
+      // short by the Stop button still keeps whatever had already arrived.
+      //
+      // The "only if text arrived" rule has to match the client's commit rule in
+      // useChat.ts, or the stored history and the on-screen history drift apart.
+      if (assistantText) {
+        try {
+          await appendMessage(conversation.id, {
+            role: "ASSISTANT",
+            content: assistantText,
+            movies: assistantMovies.length ? assistantMovies : undefined,
+          });
+        } catch (persistErr) {
+          // The user already has their answer; losing the copy is not worth
+          // throwing over, and the response has been sent so we cannot report it.
+          console.error("Failed to persist assistant message:", persistErr);
+        }
+      }
     }
   } catch (err) {
     next(err);
