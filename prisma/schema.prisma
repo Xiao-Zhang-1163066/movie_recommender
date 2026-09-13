@@ -134,8 +134,10 @@ model Conversation {
   // One conversation only ever has one current summary, and superseded summaries
   // have no value once folded in, so this is a column rather than its own table.
   summary        String?
-  // Watermark: the highest seq already folded into `summary`. Summarisation
-  // reads only rows above it, which is what makes a repeated run harmless.
+  // Watermark: the seq at which unsummarised history begins. Everything below
+  // it is already folded into `summary`, so summarisation only ever reads rows
+  // from here up, which is what makes a repeated run harmless. 0 means nothing
+  // has been folded yet.
   summarizedUpTo Int      @default(0)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt

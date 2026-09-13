@@ -1,3 +1,5 @@
+import { generateText } from "ai";
+import { createGroq } from "@ai-sdk/groq";
 import { prisma } from "../config/db.js";
 
 // A conversation title is only ever a label in the sidebar, so it is taken from
@@ -44,10 +46,20 @@ export async function getOrCreateConversation(userId, conversationId, firstMessa
   return conversation;
 }
 
-/** Every message in the conversation, oldest first. */
-export async function loadHistory(conversationId) {
+/**
+ * Messages in the conversation, oldest first.
+ *
+ * `fromSeq` skips everything already folded into the rolling summary, which is
+ * what keeps the prompt from growing without limit. Omit it to get the whole
+ * thread, which is what the UI wants: a reader should see every message, even
+ * the ones the model is now being given as a summary instead.
+ */
+export async function loadHistory(conversationId, { fromSeq } = {}) {
   return prisma.chatMessage.findMany({
-    where: { conversationId },
+    where: {
+      conversationId,
+      ...(fromSeq ? { seq: { gte: fromSeq } } : {}),
+    },
     orderBy: { seq: "asc" },
   });
 }
@@ -124,4 +136,86 @@ export function buildClientMessages(rows) {
     content: row.content,
     movies: row.movies ?? undefined,
   }));
+}
+
+// How many of the most recent messages always stay word for word. Five turns is
+// enough for "the second one", "that other film", "make it shorter" to resolve
+// against the actual text rather than a paraphrase of it.
+const KEEP_RECENT = 10;
+
+// How far past the window a conversation must drift before it is worth folding.
+// Summarising the instant a single message falls out would mean an extra model
+// call on nearly every turn to compress one message.
+const SUMMARY_TRIGGER = 6;
+
+/**
+ * Fold the oldest messages of a conversation into its rolling summary.
+ *
+ * Rolling, not re-summarised from scratch: each run is given the previous
+ * summary plus only the messages that have newly fallen out of the window, so
+ * the cost of a run stays flat no matter how long the conversation gets.
+ *
+ * Safe to run more than once, and safe to lose. summarizedUpTo is the seq where
+ * unsummarised history begins, so a run only ever reads messages above it, and
+ * the write below refuses to apply if another run moved the watermark first. A
+ * run that never happens is simply picked up on the next turn.
+ *
+ * Call this after the response has been sent. It must never be on the path
+ * between the model and the user.
+ */
+export async function maybeSummarize(conversationId) {
+  const conversation = await prisma.conversation.findUnique({
+    where: { id: conversationId },
+    select: { summary: true, summarizedUpTo: true },
+  });
+  if (!conversation) return { summarized: false, reason: "gone" };
+
+  const rows = await loadHistory(conversationId, {
+    fromSeq: conversation.summarizedUpTo,
+  });
+
+  if (rows.length <= KEEP_RECENT + SUMMARY_TRIGGER) {
+    return { summarized: false, reason: "below_threshold" };
+  }
+
+  const toFold = rows.slice(0, rows.length - KEEP_RECENT);
+  // Exclusive: the seq at which unsummarised history now begins.
+  const nextWatermark = toFold[toFold.length - 1].seq + 1;
+
+  const transcript = toFold
+    .map((row) => `${row.role === "USER" ? "User" : "Assistant"}: ${row.content}`)
+    .join("\n");
+
+  // The small sibling of the chat model. This is compression, not reasoning, and
+  // it runs on every long conversation, so it should not cost what answering
+  // costs. (llama-3.1-8b-instant is not available on this Groq account.)
+  const groq = createGroq({ apiKey: process.env.GROQ_API_KEY });
+
+  const { text } = await generateText({
+    model: groq("openai/gpt-oss-20b"),
+    system:
+      "You compress the older part of a film-recommendation chat so it can be " +
+      "carried forward as context. Keep stated tastes, dislikes, constraints " +
+      "such as runtime or cinema, films already suggested, and anything the " +
+      "user said they had watched or rated. Drop pleasantries and repetition. " +
+      "Write one compact paragraph of plain prose, no headings, no lists.",
+    prompt: conversation.summary
+      ? `Summary of the conversation so far:\n${conversation.summary}\n\nNewer messages to fold into it:\n${transcript}`
+      : `Conversation to summarise:\n${transcript}`,
+  });
+
+  const summary = text.trim();
+  if (!summary) return { summarized: false, reason: "empty_summary" };
+
+  // Conditional on the watermark we read. If a concurrent run already folded
+  // these messages, this matches nothing and we discard our work rather than
+  // overwriting a summary that is further ahead than ours.
+  const { count } = await prisma.conversation.updateMany({
+    where: { id: conversationId, summarizedUpTo: conversation.summarizedUpTo },
+    data: { summary, summarizedUpTo: nextWatermark },
+  });
+
+  return count === 1
+    ? { summarized: true, folded: toFold.length, summarizedUpTo: nextWatermark }
+    : { summarized: false, reason: "raced" };
 }

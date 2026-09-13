@@ -18,6 +18,7 @@ import {
   appendMessage,
   buildModelMessages,
   buildClientMessages,
+  maybeSummarize,
 } from "../services/conversationService.js";
 
 // Step 1: create the AI provider
@@ -29,10 +30,17 @@ const groq = createGroq({
   apiKey: process.env.GROQ_API_KEY,
 });
 
-function buildSystemPrompt(nowShowing) {
+function buildSystemPrompt(nowShowing, summary) {
+  // The summary belongs here rather than in the message list. It is background
+  // the assistant knows, not something anybody said, and faking it as a chat
+  // turn invites the model to quote it back or treat it as the user's words.
+  const earlier = summary
+    ? `\n  Earlier in this conversation (summarised):\n  ${summary}\n`
+    : "";
+
   return `You are AI Movie Mate, a concierge that recommends films to users in
   Christchurch, New Zealand.
-
+${earlier}
   Films currently playing in Christchurch cinemas:
   ${JSON.stringify(nowShowing)}
 
@@ -208,7 +216,11 @@ export const chat = async (req, res, next) => {
     const conversation = await getOrCreateConversation(userId, conversationId, userMessage);
     await appendMessage(conversation.id, { role: "USER", content: userMessage });
 
-    const modelMessages = buildModelMessages(await loadHistory(conversation.id));
+    // Only the messages the summary does not already cover. Everything below the
+    // watermark is represented by conversation.summary in the system prompt.
+    const modelMessages = buildModelMessages(
+      await loadHistory(conversation.id, { fromSeq: conversation.summarizedUpTo }),
+    );
 
     // Pre-fetch now-showing so the model gets it as context rather than spending
     // a tool-call round-trip on get_now_showing.
@@ -238,7 +250,7 @@ export const chat = async (req, res, next) => {
 
     const result = streamText({
       model: groq("openai/gpt-oss-120b"),
-      system: buildSystemPrompt(nowShowing),
+      system: buildSystemPrompt(nowShowing, conversation.summary),
       messages: modelMessages,
       tools,
       stopWhen: stepCountIs(8),
@@ -304,6 +316,14 @@ export const chat = async (req, res, next) => {
           console.error("Failed to persist assistant message:", persistErr);
         }
       }
+
+      // Deliberately not awaited. The reply has already been delivered, so this
+      // must not add to the time the user waited, and there is no longer any
+      // response left to report a failure on. A skipped run costs nothing: the
+      // watermark means the next turn simply folds the same messages instead.
+      maybeSummarize(conversation.id).catch((summaryErr) => {
+        console.error("Failed to summarise conversation:", summaryErr);
+      });
     }
   } catch (err) {
     next(err);
