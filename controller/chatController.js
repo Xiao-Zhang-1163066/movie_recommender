@@ -30,7 +30,7 @@ const groq = createGroq({
   apiKey: process.env.GROQ_API_KEY,
 });
 
-function buildSystemPrompt(nowShowing, summary) {
+function buildSystemPrompt(nowShowing, summary, { withTools = true } = {}) {
   // The summary belongs here rather than in the message list. It is background
   // the assistant knows, not something anybody said, and faking it as a chat
   // turn invites the model to quote it back or treat it as the user's words.
@@ -38,12 +38,25 @@ function buildSystemPrompt(nowShowing, summary) {
     ? `\n  Earlier in this conversation (summarised):\n  ${summary}\n`
     : "";
 
-  return `You are AI Movie Mate, a concierge that recommends films to users in
+  const preamble = `You are AI Movie Mate, a concierge that recommends films to users in
   Christchurch, New Zealand.
 ${earlier}
   Films currently playing in Christchurch cinemas:
   ${JSON.stringify(nowShowing)}
+`;
 
+  // The retry after an empty reply runs with no tools at all. It must not be
+  // told it "MUST call recommend_movies", or it writes the tool call out as JSON
+  // in the middle of its prose, which is what the user then reads.
+  if (!withTools) {
+    return `${preamble}
+  Answer the user now, in two or three sentences of plain prose, naming specific
+  films from the list above where they fit. You have no tools for this reply, so
+  never write a function or tool call, never emit JSON or code blocks, and do not
+  mention searching or looking anything up.`;
+  }
+
+  return `${preamble}
   How to recommend:
   1. At least one of your recommendations MUST come from the now-showing list above. You may
   also suggest other relevant films that are not currently playing.
@@ -98,6 +111,58 @@ function extractRetryAfter(err) {
   }
   return 60;
 }
+
+// Shown only when the model produced nothing and the retry below also produced
+// nothing. Better than leaving the user looking at their own message and silence.
+const EMPTY_REPLY_FALLBACK =
+  "Sorry, I got stuck working that one out. Could you ask me again, perhaps a little differently?";
+
+/**
+ * Ask once more, with no tools at all, and stream the answer.
+ *
+ * The model can burn its whole step budget calling tools and never get around to
+ * writing anything, which ends the turn with `finishReason: "tool-calls"` and no
+ * text. Observed in practice as eight consecutive search_movies calls.
+ *
+ * Only the real conversation is replayed. The half-finished tool calls from the
+ * first attempt are deliberately left out: the SDK sends `tool_choice: none`
+ * when no tools are defined, and feeding the model its own pending tool calls
+ * tempts it into making another, which Groq rejects outright with "Tool choice
+ * is none, but model called a tool". Losing those results costs some detail;
+ * carrying them costs the whole retry. The now-showing list is in the system
+ * prompt either way, which is the bulk of what a reply needs.
+ *
+ * This reply cannot produce movie cards, since recommend_movies is itself a
+ * tool. Text without cards still beats silence.
+ *
+ * Returns whatever text it managed to stream.
+ */
+async function streamReplyWithoutTools({ res, system, messages, abortSignal }) {
+  const result = streamText({
+    model: groq("openai/gpt-oss-120b"),
+    system,
+    messages,
+    abortSignal,
+  });
+
+  let text = "";
+  for await (const part of result.fullStream) {
+    if (res.writableEnded) break;
+    if (part.type === "text-delta") {
+      text += part.text;
+      res.write(JSON.stringify({ t: "text", v: part.text }) + "\n");
+    } else if (part.type === "error") {
+      console.error("Empty-reply retry failed:", part.error);
+      break;
+    }
+  }
+  return text;
+}
+
+// How many tool-call rounds a single turn may take before the SDK stops the
+// loop. Hitting this is what leaves a turn with no text: the run is cut off
+// while tool calls are still pending, which is why the retry above exists.
+const MAX_STEPS = 8;
 
 const MODEL_ERROR_MESSAGES = {
   rate_limit: "The AI service is temporarily at capacity. Please try again shortly.",
@@ -253,7 +318,7 @@ export const chat = async (req, res, next) => {
       system: buildSystemPrompt(nowShowing, conversation.summary),
       messages: modelMessages,
       tools,
-      stopWhen: stepCountIs(8),
+      stopWhen: stepCountIs(MAX_STEPS),
       abortSignal: controller.signal,
     });
 
@@ -261,6 +326,12 @@ export const chat = async (req, res, next) => {
     // now only the browser kept a running copy of the reply.
     let assistantText = "";
     let assistantMovies = [];
+    // Set when the SDK reports a model or tool failure. The empty-reply retry
+    // below is for a turn that ran cleanly but said nothing; retrying a turn that
+    // already told the user it failed would just spend quota and confuse them.
+    let streamFailed = false;
+
+    const systemPrompt = buildSystemPrompt(nowShowing, conversation.summary);
 
     try {
       for await (const part of result.fullStream) {
@@ -278,12 +349,35 @@ export const chat = async (req, res, next) => {
           // The SDK surfaces model/tool failures as a stream part rather than
           // throwing — classify and forward so the client can show targeted help.
           console.error("Chat fullStream error part:", part.error);
+          streamFailed = true;
           const kind = classifyModelError(part.error);
           const retryAfter = kind === "rate_limit" ? extractRetryAfter(part.error) : undefined;
           res.write(
             JSON.stringify({ t: "error", v: MODEL_ERROR_MESSAGES[kind], kind, retryAfter }) + "\n",
           );
         }
+      }
+
+      // A turn that ran cleanly but produced no words at all. The user is
+      // looking at their own message and nothing else, so try once more.
+      if (!assistantText && !streamFailed && !res.writableEnded && !controller.signal.aborted) {
+        console.warn(
+          "Empty reply, retrying without tools. finishReason:",
+          await result.finishReason.catch(() => "unknown"),
+        );
+
+        assistantText = await streamReplyWithoutTools({
+          res,
+          system: buildSystemPrompt(nowShowing, conversation.summary, { withTools: false }),
+          messages: modelMessages,
+          abortSignal: controller.signal,
+        });
+      }
+
+      // Retry said nothing either. Say *something*, so the turn is never silent.
+      if (!assistantText && !streamFailed && !res.writableEnded && !controller.signal.aborted) {
+        assistantText = EMPTY_REPLY_FALLBACK;
+        res.write(JSON.stringify({ t: "text", v: assistantText }) + "\n");
       }
     } catch (streamErr) {
       console.error("Chat stream error:", streamErr);
