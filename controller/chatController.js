@@ -30,7 +30,7 @@ const groq = createGroq({
   apiKey: process.env.GROQ_API_KEY,
 });
 
-function buildSystemPrompt(nowShowing, summary, { withTools = true } = {}) {
+export function buildSystemPrompt(nowShowing, summary, { withTools = true } = {}) {
   // The summary belongs here rather than in the message list. It is background
   // the assistant knows, not something anybody said, and faking it as a chat
   // turn invites the model to quote it back or treat it as the user's words.
@@ -38,11 +38,26 @@ function buildSystemPrompt(nowShowing, summary, { withTools = true } = {}) {
     ? `\n  Earlier in this conversation (summarised):\n  ${summary}\n`
     : "";
 
+  // An empty list is a normal state, not an error: the scraper may not have run
+  // yet, or every session on file may have already passed. Saying so plainly
+  // matters, because the alternative is printing "[]" and then, below, ordering
+  // the model to pick something out of it. Measured against that contradiction,
+  // the model searched three to eight times per turn hunting for a listing that
+  // did not exist and ended two turns in five with nothing written at all. With
+  // a populated list the same prompts took zero or one search and always
+  // answered. See docs/bugs-found.md entry 5.
+  const listing = nowShowing.length
+    ? `Films currently playing in Christchurch cinemas:
+  ${JSON.stringify(nowShowing)}`
+    : `Cinema listings are unavailable right now, so you do not know what is
+  playing in Christchurch today. Say so once, briefly, and move on to helping.
+  Do not search for showtimes or listings — that data is simply not there, and
+  searching repeatedly for it will not find any.`;
+
   const preamble = `You are AI Movie Mate, a concierge that recommends films to users in
   Christchurch, New Zealand.
 ${earlier}
-  Films currently playing in Christchurch cinemas:
-  ${JSON.stringify(nowShowing)}
+  ${listing}
 `;
 
   // The retry after an empty reply runs with no tools at all. It must not be
@@ -56,10 +71,18 @@ ${earlier}
   mention searching or looking anything up.`;
   }
 
+  // Rule 1 is conditional on there being a list to pick from. Keeping it when
+  // the list is empty is an instruction the model cannot satisfy, and an
+  // unsatisfiable instruction is what sent it into the search loop.
+  const inTheatreRule = nowShowing.length
+    ? `1. At least one of your recommendations MUST come from the now-showing list above. You may
+  also suggest other relevant films that are not currently playing.`
+    : `1. There is no now-showing list, so recommend real films on their merits and do not claim
+  anything is or is not in cinemas.`;
+
   return `${preamble}
   How to recommend:
-  1. At least one of your recommendations MUST come from the now-showing list above. You may
-  also suggest other relevant films that are not currently playing.
+  ${inTheatreRule}
   2. Never invent TMDB ids. Every tmdbId must come from the now-showing list or search_movies —
   real movies only. Use get_movie_details if you need runtime or genres before deciding.
   3. When you suggest specific films you MUST call recommend_movies, passing each film's TMDB
