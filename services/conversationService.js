@@ -56,6 +56,29 @@ export async function getOrCreateConversation(
   return conversation;
 }
 
+// A sidebar is a glance, not an archive. Capping the query keeps it one small
+// indexed read however many threads a user accumulates.
+const CONVERSATION_LIST_LIMIT = 30;
+
+/**
+ * The user's most recently active conversations, newest first.
+ *
+ * Ordering by updatedAt rather than createdAt puts a thread the user has just
+ * replied in at the top, which is what "recent" means to them. appendMessage
+ * bumps updatedAt on every turn, and the @@index([userId, updatedAt]) on
+ * Conversation is what makes this a cheap read.
+ *
+ * Returns no message bodies: the list only needs a label per row.
+ */
+export async function listConversations(userId, { prisma = defaultPrisma } = {}) {
+  return prisma.conversation.findMany({
+    where: { userId },
+    orderBy: { updatedAt: "desc" },
+    take: CONVERSATION_LIST_LIMIT,
+    select: { id: true, title: true, updatedAt: true },
+  });
+}
+
 /**
  * Messages in the conversation, oldest first.
  *

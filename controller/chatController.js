@@ -19,6 +19,7 @@ import {
   buildModelMessages,
   buildClientMessages,
   maybeSummarize,
+  listConversations,
 } from "../services/conversationService.js";
 
 // Step 1: create the AI provider
@@ -474,6 +475,21 @@ export const getConversation = async (req, res, next) => {
         },
       },
     });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * GET /chat
+ *
+ * The threads to show in the sidebar. Without this a conversation is only
+ * reachable by still holding its URL, which makes storing them half useful.
+ */
+export const getConversations = async (req, res, next) => {
+  try {
+    const conversations = await listConversations(req.user.id);
+    res.status(200).json({ status: "success", data: { conversations } });
   } catch (err) {
     next(err);
   }

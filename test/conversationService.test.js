@@ -12,6 +12,7 @@ vi.mock("../config/db.js", () => ({
 
 const {
   getOrCreateConversation,
+  listConversations,
   loadHistory,
   appendMessage,
   buildModelMessages,
@@ -111,6 +112,21 @@ describe("getOrCreateConversation", () => {
     await expect(
       getOrCreateConversation("u2", "c1", null, { prisma }),
     ).rejects.toMatchObject({ statusCode: 404, message: "Conversation not found" });
+  });
+});
+
+describe("listConversations", () => {
+  it("scopes to the user, orders by recency, caps the page and fetches no message bodies", async () => {
+    const prisma = { conversation: { findMany: vi.fn().mockResolvedValue([]) } };
+
+    await listConversations("u1", { prisma });
+
+    const args = prisma.conversation.findMany.mock.calls[0][0];
+    expect(args.where).toEqual({ userId: "u1" });
+    // updatedAt, not createdAt: a thread just replied in belongs at the top.
+    expect(args.orderBy).toEqual({ updatedAt: "desc" });
+    expect(args.take).toBeGreaterThan(0);
+    expect(args.select).toEqual({ id: true, title: true, updatedAt: true });
   });
 });
 

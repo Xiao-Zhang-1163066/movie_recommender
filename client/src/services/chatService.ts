@@ -29,6 +29,13 @@ type Conversation = {
   messages: Message[];
 };
 
+// A sidebar row. No message bodies — the list only needs a label per thread.
+export type ConversationSummary = {
+  id: string;
+  title: string | null;
+  updatedAt: string;
+};
+
 export async function postChatMessage(
   message: string,
   // Absent on the first send of a new chat. The server creates the thread and
@@ -85,4 +92,18 @@ export async function getConversation(conversationId: string): Promise<Conversat
 
   const data = await res.json();
   return data.data.conversation;
+}
+
+/** The user's recent threads, newest first, for the sidebar. */
+export async function listConversations(): Promise<ConversationSummary[]> {
+  const res = await fetch(`${API_BASE}/api/chat`, { headers: { ...getAuthHeaders() } });
+
+  if (!res.ok) {
+    if (res.status === 401) throw new Error("SESSION_EXPIRED");
+    const data = await res.json().catch(() => ({}));
+    throw new Error(readErrorMessage(data, "Could not load your conversations"));
+  }
+
+  const data = await res.json();
+  return data.data.conversations;
 }

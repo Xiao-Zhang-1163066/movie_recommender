@@ -1,6 +1,6 @@
 import express from "express";
 import { protect } from "../middleware/authMiddleware.js";
-import { chat, getConversation } from "../controller/chatController.js";
+import { chat, getConversation, getConversations } from "../controller/chatController.js";
 import chatLimiter from "../middleware/chatLimiter.js";
 import { validate } from "../middleware/validateRequest.js";
 import { chatMessageSchema } from "../validators/chatValidators.js";
@@ -12,8 +12,14 @@ const router = express.Router();
 // counts against the sender's quota instead of being waved through for free.
 router.post("/", protect, chatLimiter, validate(chatMessageSchema), chat);
 
-// Reading a stored conversation is a cheap database read with no model call, so
-// it is not worth spending the chat quota on.
+// Reading stored conversations is a cheap database read with no model call, so
+// neither route is worth spending the chat quota on.
+//
+// The collection route is declared before the parameterised one. Express matches
+// in order, so "/" and "/:conversationId" cannot collide, but keeping the
+// specific route first is the habit that stops a later "/recent" or "/search"
+// from being swallowed as an id.
+router.get("/", protect, getConversations);
 router.get("/:conversationId", protect, getConversation);
 
 export default router;
