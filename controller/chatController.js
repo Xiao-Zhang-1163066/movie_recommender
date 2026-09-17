@@ -1,17 +1,8 @@
-import { streamText, tool, stepCountIs } from "ai";
+import { streamText, stepCountIs } from "ai";
 // import { createGoogleGenerativeAI } from "@ai-sdk/google";
-import { z } from "zod";
 import { createGroq } from "@ai-sdk/groq";
-import {
-  getUserWatchlist,
-  getTasteProfile,
-  markWatched,
-  searchMovies,
-  getMovieDetails,
-  getShowtimes,
-  recommendMovies,
-  getNowShowing,
-} from "./chatTools.js";
+import { getNowShowing } from "./chatTools.js";
+import { buildTools } from "../services/agentTools.js";
 import {
   getOrCreateConversation,
   loadHistory,
@@ -221,81 +212,9 @@ export const chat = async (req, res, next) => {
     // to happen again here for the version that gets stored and sent.
     const userMessage = message.trim();
 
-    const tools = {
-      get_user_watchlist: tool({
-        description:
-          "Get the logged-in user's watchlist, optionally filtered by status (PLANNED, WATCHING, COMPLETED, DROPPED)",
-        inputSchema: z.object({
-          status: z
-            .enum(["PLANNED", "WATCHING", "COMPLETED", "DROPPED"])
-            .optional(),
-        }),
-        execute: async ({ status }) => getUserWatchlist(userId, status),
-      }),
-      get_taste_profile: tool({
-        description:
-          "Get a summary of the user's movie taste based on their watched and rated movies",
-        inputSchema: z.object({}),
-        execute: async () => getTasteProfile(userId),
-      }),
-      mark_watched: tool({
-        description:
-          "Mark a movie as watched for the logged-in user, optionally with a rating (1-10) and notes",
-        inputSchema: z.object({
-          movieId: z.string(),
-          rating: z.number().min(1).max(10).optional(),
-          notes: z.string().optional(),
-        }),
-        execute: async ({ movieId, rating, notes }) =>
-          markWatched(userId, movieId, rating, notes),
-      }),
-
-      search_movies: tool({
-        description: "Search for movies by title using TMDB",
-        inputSchema: z.object({
-          query: z.string(),
-        }),
-        execute: async ({ query }) => searchMovies(query),
-      }),
-
-      get_movie_details: tool({
-        description:
-          "Get full details for a specific movie by its TMDB movie ID",
-        inputSchema: z.object({
-          movieId: z.string(),
-        }),
-        execute: async ({ movieId }) => getMovieDetails(movieId),
-      }),
-
-      get_showtimes: tool({
-        description:
-          "Get cinema showtimes for a specific movie, optionally filtered by date (YYYY-MM-DD format)",
-        inputSchema: z.object({
-          movieId: z.string(),
-          date: z.string().optional(),
-        }),
-        execute: async ({ movieId, date }) => getShowtimes(movieId, date),
-      }),
-
-      recommend_movies: tool({
-        description:
-          "Display recommended movies to the user as visual cards. Call this whenever you suggest specific films. For each movie pass its TMDB id and a short reason it fits the user's request — the reason is shown on the card.",
-        inputSchema: z.object({
-          recommendations: z.array(
-            z.object({
-              tmdbId: z.number(),
-              reason: z
-                .string()
-                .describe(
-                  "One short sentence on why this movie fits what the user asked for",
-                ),
-            }),
-          ),
-        }),
-        execute: async ({ recommendations }) =>
-          recommendMovies(recommendations),
-      }),
-    };
+    // Definitions live in services/agentTools.js so the eval suite can build the
+    // exact tool set the model sees here, without an HTTP request or a database.
+    const tools = buildTools(userId);
 
     // Resolve the thread and store the user's turn *before* the model is called.
     // If Groq is down, or the process dies mid-request, what the person typed is
@@ -337,9 +256,11 @@ export const chat = async (req, res, next) => {
       }) + "\n",
     );
 
+    const systemPrompt = buildSystemPrompt(nowShowing, conversation.summary);
+
     const result = streamText({
       model: groq("openai/gpt-oss-120b"),
-      system: buildSystemPrompt(nowShowing, conversation.summary),
+      system: systemPrompt,
       messages: modelMessages,
       tools,
       stopWhen: stepCountIs(MAX_STEPS),
@@ -354,8 +275,6 @@ export const chat = async (req, res, next) => {
     // below is for a turn that ran cleanly but said nothing; retrying a turn that
     // already told the user it failed would just spend quota and confuse them.
     let streamFailed = false;
-
-    const systemPrompt = buildSystemPrompt(nowShowing, conversation.summary);
 
     try {
       for await (const part of result.fullStream) {
