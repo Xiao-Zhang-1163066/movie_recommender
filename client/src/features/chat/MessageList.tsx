@@ -57,6 +57,20 @@ function MovieGrid({
   );
 }
 
+// The backend sends raw tool names; the wording lives here so copy changes ship
+// with the frontend instead of needing a backend deploy. Keys match the tool
+// names in services/agentTools.js — and therefore AgentRun.toolCalls, so the log
+// and the UI describe a turn in the same vocabulary.
+const TOOL_LABELS: Record<string, string> = {
+  search_movies: "Searching TMDB…",
+  get_movie_details: "Looking up details…",
+  get_showtimes: "Checking showtimes…",
+  get_user_watchlist: "Checking your watchlist…",
+  get_taste_profile: "Reading your taste…",
+  mark_watched: "Updating your watchlist…",
+  recommend_movies: "Picking recommendations…",
+};
+
 const EXAMPLE_QUESTIONS = [
   "What's showing in Christchurch right now?",
   "Recommend a thriller for tonight",
@@ -68,12 +82,14 @@ function MessageList({
   messages,
   streamingText,
   streamingMovies,
+  activeTool,
   isLoading,
   onExampleClick,
 }: {
   messages: Message[];
   streamingText: string;
   streamingMovies: ChatMovie[];
+  activeTool: string | null;
   isLoading: boolean;
   onExampleClick: (q: string) => void;
 }) {
@@ -161,15 +177,31 @@ function MessageList({
         ))}
 
         {isLoading && !streamingText && (
-          <div
-            className="self-start px-4 py-3 text-sm leading-relaxed"
-            style={{
-              borderRadius: "14px",
-              background: "var(--surface-2)",
-              // color: "var(--text-2)",
-            }}
-          >
-            <DotStream size="60" speed="2.5" color="#c6f432" />
+          <div className="self-start flex flex-col items-start gap-2">
+            {/* Unknown names fall back rather than render an empty pill — the
+                backend can add a tool before the frontend knows its wording. */}
+            {activeTool && (
+              <div
+                className="px-3 py-1.5 text-xs rounded-full"
+                style={{
+                  background: "var(--surface-2)",
+                  color: "var(--text-2)",
+                  border: "1px solid",
+                }}
+              >
+                {TOOL_LABELS[activeTool] ?? "Working…"}
+              </div>
+            )}
+            <div
+              className="px-4 py-3 text-sm leading-relaxed"
+              style={{
+                borderRadius: "14px",
+                background: "var(--surface-2)",
+                // color: "var(--text-2)",
+              }}
+            >
+              <DotStream size="60" speed="2.5" color="#c6f432" />
+            </div>
           </div>
         )}
 

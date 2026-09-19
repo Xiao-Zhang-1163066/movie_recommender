@@ -20,6 +20,8 @@ export function useChat(urlConversationId?: string) {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [streamingText, setStreamingText] = useState("");
   const [streamingMovies, setStreamingMovies] = useState<ChatMovie[]>([]);
+  // Which tool the agent is running right now, or null. Raw name, not copy.
+  const [activeTool, setActiveTool] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [input, setInput] = useState("");
 
@@ -189,8 +191,15 @@ export function useChat(urlConversationId?: string) {
               navigate(`/chat/${event.v.id}`, { replace: true });
             }
           } else if (event.t === "text") {
+            // Words have started, so the pill has done its job. Set to null
+            // unconditionally rather than reading activeTool first — this closure
+            // captured the value from the render that started the stream, so the
+            // read would be stale. React bails out when the value is unchanged.
+            setActiveTool(null);
             assistantText += event.v;
             setStreamingText(assistantText);
+          } else if (event.t === "tool") {
+            setActiveTool(event.v.name);
           } else if (event.t === "movies") {
             assistantMovies = [...assistantMovies, ...event.v];
             setStreamingMovies(assistantMovies);
@@ -257,6 +266,10 @@ export function useChat(urlConversationId?: string) {
       // (finally runs even when catch does `return`.)
       setStreamingText("");
       setStreamingMovies([]);
+      // Cleared here as well as on the first text delta. A stopped, failed or
+      // text-less stream never reaches that branch, and without this the pill
+      // would spin forever.
+      setActiveTool(null);
       setIsLoading(false);
       abortControllerRef.current = null;
     }
@@ -290,6 +303,7 @@ export function useChat(urlConversationId?: string) {
     messages,
     streamingText,
     streamingMovies,
+    activeTool,
     isLoading,
     input,
     setInput,

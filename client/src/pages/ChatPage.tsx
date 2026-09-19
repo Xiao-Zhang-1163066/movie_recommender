@@ -19,6 +19,7 @@ function ChatPage() {
     messages,
     streamingText,
     streamingMovies,
+    activeTool,
     isLoading,
     input,
     setInput,
@@ -56,6 +57,7 @@ function ChatPage() {
               messages={messages}
               streamingText={streamingText}
               streamingMovies={streamingMovies}
+              activeTool={activeTool}
               isLoading={isLoading}
               onExampleClick={sendMessage}
             />

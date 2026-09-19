@@ -296,6 +296,17 @@ export const chat = async (req, res, next) => {
         if (part.type === "text-delta") {
           assistantText += part.text;
           res.write(JSON.stringify({ t: "text", v: part.text }) + "\n");
+        } else if (part.type === "tool-call") {
+          // Deliberately NOT added to assistantText. That variable is what gets
+          // written to ChatMessage, and stored history must replay exactly what
+          // was stored — a progress pill is transient UI, not conversation.
+          //
+          // The raw tool name crosses the wire, not finished copy: wording is the
+          // frontend's job, so changing it never needs a backend deploy, and this
+          // stays the same vocabulary as AgentRun.toolCalls.
+          res.write(
+            JSON.stringify({ t: "tool", v: { name: part.toolName } }) + "\n",
+          );
         } else if (
           part.type === "tool-result" &&
           part.toolName === "recommend_movies"

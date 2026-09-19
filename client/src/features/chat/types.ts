@@ -27,5 +27,9 @@ export type StreamEvent =
   // needs it for the URL and for sending the next message into the same thread.
   | { t: "conversation"; v: { id: string; title: string | null } }
   | { t: "text"; v: string }
+  // Transient progress only — never stored, never replayed by GET /chat/:id.
+  // Carries the raw tool name; the human wording lives in the UI so copy can
+  // change without a backend deploy.
+  | { t: "tool"; v: { name: string } }
   | { t: "movies"; v: ChatMovie[] }
   | { t: "error"; v: string; kind?: "rate_limit" | "daily_limit" | "context_limit" | "general"; retryAfter?: number };
