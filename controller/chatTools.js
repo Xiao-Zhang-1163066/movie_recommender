@@ -218,7 +218,10 @@ export async function getNowShowing({
   prisma = defaultPrisma,
   cache = defaultCache,
 } = {}) {
-  const CACHE_KEY = "now_showing";
+  // Bumped to :v2 when overview was dropped below. The shape of a cached value is
+  // part of its identity — reusing the key would serve the old fat payload for up
+  // to 5 more minutes after deploy, from a cache that looks perfectly healthy.
+  const CACHE_KEY = "now_showing:v2";
   const cached = await cache.get(CACHE_KEY);
   if (cached) return cached;
 
@@ -227,12 +230,14 @@ export async function getNowShowing({
       sessions: { some: { startsAt: { gt: new Date() } } },
       tmdbId: { not: null },
     },
+    // overview dropped: 21 blurbs were ~71% of this payload and rode into every
+    // system prompt unread. The prompt already tells the model to call
+    // get_movie_details when it wants a synopsis, so this is repeated, not lost.
     select: {
       tmdbId: true,
       title: true,
       genres: true,
       voteAverage: true,
-      overview: true,
     },
   });
   await cache.set(CACHE_KEY, nowShowing, 300);
