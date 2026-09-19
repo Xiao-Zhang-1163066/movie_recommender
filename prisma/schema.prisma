@@ -195,6 +195,14 @@ model AgentRun {
   toolCalls    String[] @default([])
   steps        Int?
   finishReason String?
+  // True when the first attempt produced no text and the no-tools retry ran.
+  // Worth its own column because a retry is invisible to the user but is a
+  // second model call, so a rising retry rate is a rising bill.
+  retried      Boolean  @default(false)
+  errored      Boolean  @default(false)
+  // The same classification the user was shown ("rate_limit", "daily_limit",
+  // "context_limit", "general"), so a spike here lines up with complaints.
+  errorKind    String?
   // Loose reference, deliberately no foreign key. This is an append-only log,
   // and a cascade from Conversation would delete the very history it exists to
   // preserve.

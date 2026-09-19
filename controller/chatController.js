@@ -284,6 +284,11 @@ export const chat = async (req, res, next) => {
     // below is for a turn that ran cleanly but said nothing; retrying a turn that
     // already told the user it failed would just spend quota and confuse them.
     let streamFailed = false;
+    // Both end up on the log row. errorKind is the same classification the user
+    // is shown, so a spike here lines up with complaints; retried marks a turn
+    // that quietly cost two model calls instead of one.
+    let errorKind = null;
+    let retried = false;
 
     try {
       for await (const part of result.fullStream) {
@@ -303,6 +308,7 @@ export const chat = async (req, res, next) => {
           console.error("Chat fullStream error part:", part.error);
           streamFailed = true;
           const kind = classifyModelError(part.error);
+          errorKind = kind;
           const retryAfter = kind === "rate_limit" ? extractRetryAfter(part.error) : undefined;
           res.write(
             JSON.stringify({ t: "error", v: MODEL_ERROR_MESSAGES[kind], kind, retryAfter }) + "\n",
@@ -318,6 +324,7 @@ export const chat = async (req, res, next) => {
           await result.finishReason.catch(() => "unknown"),
         );
 
+        retried = true;
         assistantText = await streamReplyWithoutTools({
           res,
           system: buildSystemPrompt(nowShowing, conversation.summary, { withTools: false }),
@@ -333,8 +340,12 @@ export const chat = async (req, res, next) => {
       }
     } catch (streamErr) {
       console.error("Chat stream error:", streamErr);
+      // Recorded outside the writableEnded guard below: the turn failed whether
+      // or not there is still a response open to tell the user about it.
+      streamFailed = true;
+      errorKind = classifyModelError(streamErr);
       if (!res.writableEnded) {
-        const kind = classifyModelError(streamErr);
+        const kind = errorKind;
         const retryAfter = kind === "rate_limit" ? extractRetryAfter(streamErr) : undefined;
         res.write(
           JSON.stringify({ t: "error", v: MODEL_ERROR_MESSAGES[kind], kind, retryAfter }) + "\n",
@@ -397,6 +408,9 @@ export const chat = async (req, res, next) => {
         steps: steps.length,
         finishReason,
         latencyMs: Date.now() - startedAt,
+        retried,
+        errored: streamFailed,
+        errorKind,
       }).catch((logErr) => {
         console.error("Failed to record agent run:", logErr);
       });
