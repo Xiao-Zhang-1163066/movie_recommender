@@ -3,6 +3,7 @@ import { streamText, stepCountIs } from "ai";
 import { createGroq } from "@ai-sdk/groq";
 import { getNowShowing } from "./chatTools.js";
 import { buildTools } from "../services/agentTools.js";
+import { recordAgentRun } from "../services/agentRunService.js";
 import {
   getOrCreateConversation,
   loadHistory,
@@ -21,6 +22,10 @@ import {
 const groq = createGroq({
   apiKey: process.env.GROQ_API_KEY,
 });
+
+// Named once because two calls use it and every log row records it. A second
+// literal drifting out of step would quietly mislabel which model produced a row.
+const CHAT_MODEL = "openai/gpt-oss-120b";
 
 export function buildSystemPrompt(nowShowing, summary, { withTools = true } = {}) {
   // The summary belongs here rather than in the message list. It is background
@@ -154,7 +159,7 @@ const EMPTY_REPLY_FALLBACK =
  */
 async function streamReplyWithoutTools({ res, system, messages, abortSignal }) {
   const result = streamText({
-    model: groq("openai/gpt-oss-120b"),
+    model: groq(CHAT_MODEL),
     system,
     messages,
     abortSignal,
@@ -258,8 +263,12 @@ export const chat = async (req, res, next) => {
 
     const systemPrompt = buildSystemPrompt(nowShowing, conversation.summary);
 
+    // Wall-clock from just before the model call to the end of the stream. This
+    // is what the user actually waited for, which is the number worth keeping.
+    const startedAt = Date.now();
+
     const result = streamText({
-      model: groq("openai/gpt-oss-120b"),
+      model: groq(CHAT_MODEL),
       system: systemPrompt,
       messages: modelMessages,
       tools,
@@ -360,6 +369,25 @@ export const chat = async (req, res, next) => {
       // watermark means the next turn simply folds the same messages instead.
       maybeSummarize(conversation.id).catch((summaryErr) => {
         console.error("Failed to summarise conversation:", summaryErr);
+      });
+
+      // Also not awaited, for the same reason: the reply has been sent, so the
+      // log must never add to what the user waited for.
+      //
+      // totalUsage has already settled by the time we get here, because the loop
+      // above consumed the whole stream. It rejects when the run failed outright,
+      // which is not worth throwing over — a row with no token counts still
+      // records that the turn happened and how long it took.
+      const usage = await result.totalUsage.catch(() => null);
+
+      recordAgentRun({
+        userId,
+        model: CHAT_MODEL,
+        inputTokens: usage?.inputTokens,
+        outputTokens: usage?.outputTokens,
+        latencyMs: Date.now() - startedAt,
+      }).catch((logErr) => {
+        console.error("Failed to record agent run:", logErr);
       });
     }
   } catch (err) {

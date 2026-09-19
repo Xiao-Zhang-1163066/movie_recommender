@@ -178,3 +178,17 @@ enum ChatRole {
   USER
   ASSISTANT
 }
+
+// One row per agent turn, written after the reply has been sent.
+// Without this, everything we know about a turn is lost the moment it ends.
+model AgentRun {
+  id     String @id @default(uuid())
+  userId String
+  model  String
+  // Nullable, not 0: a turn that failed before the model answered reported no
+  // token counts at all, and storing 0 would look like a free turn instead.
+  inputTokens  Int?
+  outputTokens Int?
+  latencyMs    Int
+  createdAt    DateTime @default(now())
+}
