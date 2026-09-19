@@ -8,6 +8,7 @@ import watchlistRoutes from "./routes/watchlistRoutes.js";
 import cinemaRoutes from "./routes/cinemaRoutes.js";
 import sessionRoutes from "./routes/sessionRoutes.js";
 import chatRoutes from "./routes/chatRoutes.js";
+import adminRoutes from "./routes/adminRoutes.js";
 import { errorHandler } from "./middleware/errorMiddleware.js";
 
 // The express app is built here and exported without being started, so tests
@@ -37,6 +38,7 @@ app.use("/api/watchlist", watchlistRoutes);
 app.use("/api/cinemas", cinemaRoutes);
 app.use("/api/sessions", sessionRoutes);
 app.use("/api/chat", chatRoutes);
+app.use("/api/admin", adminRoutes);
 
 app.get("/", (req, res) => {
   res.send("Hello World!???");

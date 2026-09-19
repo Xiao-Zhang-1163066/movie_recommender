@@ -34,6 +34,9 @@ const prismaMock = {
   },
   session: { findMany: vi.fn() },
   cinema: { findMany: vi.fn(), findUnique: vi.fn() },
+  agentRun: { findMany: vi.fn(), count: vi.fn(), aggregate: vi.fn() },
+  // Called as a tagged template, so the mock receives (strings, ...values).
+  $queryRaw: vi.fn(),
 };
 
 vi.mock("../config/db.js", () => ({
@@ -207,5 +210,126 @@ describe("unhandled controller errors", () => {
     // the body said "error" while the status line said success.
     expect(res.status).toBe(500);
     expect(res.body.status).toBe("error");
+  });
+});
+
+describe("admin routes", () => {
+  const ADMIN = { id: "user-3", name: "Admin", email: "admin@example.com" };
+
+  beforeEach(() => {
+    process.env.ADMIN_EMAIL = ADMIN.email;
+    // The outer beforeEach only knows USER and OTHER_USER; protect needs to be
+    // able to load the admin too.
+    prismaMock.user.findUnique.mockImplementation(async ({ where }) => {
+      if (where.id === ADMIN.id) return { ...ADMIN, password: "$2b$10$hashed" };
+      if (where.id === USER.id) return { ...USER, password: "$2b$10$hashed" };
+      return null;
+    });
+  });
+
+  it("returns 401 without a token", async () => {
+    const res = await request(app).get("/api/admin/agent-runs");
+
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 403 for a logged-in non-admin and never reaches the controller", async () => {
+    const res = await request(app)
+      .get("/api/admin/agent-runs")
+      .set("Authorization", tokenFor(USER));
+
+    expect(res.status).toBe(403);
+    // The point of the whole slice: a valid token is not authorisation. If this
+    // assertion fails, requireAdmin ran too late to stop the query.
+    expect(prismaMock.agentRun.findMany).not.toHaveBeenCalled();
+  });
+
+  it("denies everyone when ADMIN_EMAIL is unset rather than letting everyone in", async () => {
+    delete process.env.ADMIN_EMAIL;
+
+    const res = await request(app)
+      .get("/api/admin/agent-runs")
+      .set("Authorization", tokenFor(ADMIN));
+
+    // Fail closed. Without the explicit guard in requireAdmin this would be a
+    // 200, because undefined === undefined.
+    expect(res.status).toBe(403);
+  });
+
+  it("returns 200 with rows and pagination for the admin", async () => {
+    prismaMock.agentRun.findMany.mockResolvedValue([
+      { id: "run-1", model: "openai/gpt-oss-120b", latencyMs: 1200 },
+    ]);
+    prismaMock.agentRun.count.mockResolvedValue(1);
+
+    const res = await request(app)
+      .get("/api/admin/agent-runs")
+      .set("Authorization", tokenFor(ADMIN));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.runs).toHaveLength(1);
+    expect(res.body.data.pagination).toMatchObject({ page: 1, total: 1 });
+  });
+
+  it("clamps a junk page and an oversized limit instead of passing them to Prisma", async () => {
+    prismaMock.agentRun.findMany.mockResolvedValue([]);
+    prismaMock.agentRun.count.mockResolvedValue(0);
+
+    const res = await request(app)
+      .get("/api/admin/agent-runs?page=abc&limit=999999")
+      .set("Authorization", tokenFor(ADMIN));
+
+    expect(res.status).toBe(200);
+    // NaN must never reach skip/take, and limit is capped at MAX_LIMIT.
+    expect(prismaMock.agentRun.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ skip: 0, take: 100 }),
+    );
+  });
+
+  it("computes rates and returns percentiles in the summary", async () => {
+    prismaMock.agentRun.aggregate.mockResolvedValue({
+      _avg: { inputTokens: 1000, outputTokens: 200, latencyMs: 1500 },
+      _count: 10,
+    });
+    // Promise.all evaluates in array order: errored count, then retried count.
+    prismaMock.agentRun.count
+      .mockResolvedValueOnce(2)
+      .mockResolvedValueOnce(1);
+    prismaMock.$queryRaw
+      .mockResolvedValueOnce([{ p50: 1000, p95: 5000, max: 22000 }])
+      .mockResolvedValueOnce([{ tool: "search_movies", count: 7 }]);
+
+    const res = await request(app)
+      .get("/api/admin/agent-runs/summary")
+      .set("Authorization", tokenFor(ADMIN));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.errorRate).toBeCloseTo(0.2);
+    expect(res.body.data.retryRate).toBeCloseTo(0.1);
+    expect(res.body.data.latencyMs.p95).toBe(5000);
+    expect(res.body.data.toolUsage).toEqual([
+      { tool: "search_movies", count: 7 },
+    ]);
+  });
+
+  it("reports zero rates instead of null when there are no runs", async () => {
+    prismaMock.agentRun.aggregate.mockResolvedValue({
+      _avg: { inputTokens: null, outputTokens: null, latencyMs: null },
+      _count: 0,
+    });
+    prismaMock.agentRun.count.mockResolvedValue(0);
+    prismaMock.$queryRaw
+      .mockResolvedValueOnce([{ p50: null, p95: null, max: null }])
+      .mockResolvedValueOnce([]);
+
+    const res = await request(app)
+      .get("/api/admin/agent-runs/summary")
+      .set("Authorization", tokenFor(ADMIN));
+
+    expect(res.status).toBe(200);
+    // 0/0 is NaN, and JSON.stringify(NaN) is null — a blank dashboard instead
+    // of an obvious zero.
+    expect(res.body.data.errorRate).toBe(0);
+    expect(res.body.data.retryRate).toBe(0);
   });
 });
