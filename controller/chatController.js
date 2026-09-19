@@ -379,12 +379,23 @@ export const chat = async (req, res, next) => {
       // which is not worth throwing over — a row with no token counts still
       // records that the turn happened and how long it took.
       const usage = await result.totalUsage.catch(() => null);
+      // Same pattern as totalUsage: both have already settled, and a run that
+      // failed outright yields an empty list rather than costing us the row.
+      const steps = await result.steps.catch(() => []);
+      const finishReason = await result.finishReason.catch(() => null);
 
       recordAgentRun({
         userId,
+        conversationId: conversation.id,
         model: CHAT_MODEL,
         inputTokens: usage?.inputTokens,
         outputTokens: usage?.outputTokens,
+        // Flattened in call order across every step, duplicates kept.
+        toolCalls: steps.flatMap((step) =>
+          (step.toolCalls ?? []).map((call) => call.toolName),
+        ),
+        steps: steps.length,
+        finishReason,
         latencyMs: Date.now() - startedAt,
       }).catch((logErr) => {
         console.error("Failed to record agent run:", logErr);

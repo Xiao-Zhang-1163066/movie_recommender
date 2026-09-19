@@ -189,6 +189,16 @@ model AgentRun {
   // token counts at all, and storing 0 would look like a free turn instead.
   inputTokens  Int?
   outputTokens Int?
-  latencyMs    Int
-  createdAt    DateTime @default(now())
+  // Tool names in call order, duplicates kept. The order is the point:
+  // "search_movies" eight times running is the signature of a model stuck in a
+  // loop, and a count or a de-duplicated set would hide exactly that.
+  toolCalls    String[] @default([])
+  steps        Int?
+  finishReason String?
+  // Loose reference, deliberately no foreign key. This is an append-only log,
+  // and a cascade from Conversation would delete the very history it exists to
+  // preserve.
+  conversationId String?
+  latencyMs      Int
+  createdAt      DateTime @default(now())
 }
