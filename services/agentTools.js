@@ -8,7 +8,9 @@ import {
   getMovieDetails,
   getShowtimes,
   recommendMovies,
+  findSimilarMovies,
 } from "../controller/chatTools.js";
+import { hasEmbeddingSupport } from "../services/embeddingService.js";
 
 /**
  * The tool set handed to the model, separated from the implementations in
@@ -40,7 +42,7 @@ import {
  * something needed every turn.
  */
 export function buildTools(userId, deps = {}) {
-  return {
+  const tools = {
     get_user_watchlist: tool({
       description:
         "Get the logged-in user's watchlist, optionally filtered by status (PLANNED, WATCHING, COMPLETED, DROPPED)",
@@ -71,8 +73,12 @@ export function buildTools(userId, deps = {}) {
         markWatched(userId, movieId, rating, notes, deps),
     }),
 
+    // "when the user names a film" is the half that matters now that a second
+    // search tool exists. A model picks between two tools by contrast, so each
+    // description has to say what the other one is for.
     search_movies: tool({
-      description: "Search for movies by title using TMDB",
+      description:
+        "Search all of TMDB for movies by title. Use this when the user names a specific film.",
       inputSchema: z.object({
         query: z.string(),
       }),
@@ -116,4 +122,39 @@ export function buildTools(userId, deps = {}) {
         recommendMovies(recommendations, deps),
     }),
   };
+
+  // Registered only when embeddings can actually run. Absent beats
+  // present-and-failing: a tool that throws still gets called, and every attempt
+  // spends one of the eight steps a turn is allowed. With no definition the
+  // model simply plans around it, and a clone of this repo holding only a Groq
+  // key keeps working.
+  if (hasEmbeddingSupport()) {
+    tools.find_similar_movies = tool({
+      description:
+        "Find movies by what they are like — plot, mood, theme, style — rather than by title. " +
+        "Use this whenever the user describes the kind of film they want instead of naming one. " +
+        "Searches the local Christchurch catalogue, not all of TMDB.",
+      inputSchema: z.object({
+        description: z
+          .string()
+          .describe(
+            // Measured, not guessed: plot-style wording scored 0.73 against the
+            // right film, while category wording ("a loud action blockbuster")
+            // barely cleared the noise floor. Overviews are written as plots, so
+            // queries shaped like plots match them.
+            "A short plot-style description of the film the user is imagining, in the style of a synopsis — not genre labels",
+          ),
+        onlyInTheatres: z
+          .boolean()
+          .optional()
+          .describe(
+            "True when the user wants something they can watch in a cinema now",
+          ),
+      }),
+      execute: async ({ description, onlyInTheatres }) =>
+        findSimilarMovies(description, onlyInTheatres ?? false, deps),
+    });
+  }
+
+  return tools;
 }

@@ -17,5 +17,10 @@ process.env.JWT_SECRET = "test-secret-not-used-in-production";
 process.env.JWT_EXPIRES_IN = "7d";
 process.env.TMDB_API_KEY = "test-tmdb-key";
 process.env.GROQ_API_KEY = "test-groq-key";
+// Set rather than left to chance: buildTools registers find_similar_movies only
+// when this exists, so without a fixed value the tool set would differ between a
+// machine with a .env and CI without one — a suite that passes locally and fails
+// in Actions. The gate itself is tested by deleting this inside one test.
+process.env.GEMINI_API_KEY = "test-gemini-key";
 process.env.NODE_ENV = "test";
 process.env.CORS_ORIGIN = "http://localhost:5173";

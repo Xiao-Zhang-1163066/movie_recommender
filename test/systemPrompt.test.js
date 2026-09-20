@@ -72,3 +72,42 @@ describe("buildSystemPrompt for the no-tools retry", () => {
     expect(buildSystemPrompt(showing, null, { withTools: false })).toContain("Sinners");
   });
 });
+
+describe("buildSystemPrompt — choosing between the two search tools", () => {
+  // Self-contained fixture: this block asserts the search guidance only, so it
+  // should not break if the shared now-showing fixture above is reshaped.
+  const films = [
+    { tmdbId: 1, title: "Sinners", genres: ["Horror"], voteAverage: 7.1 },
+  ];
+
+  it("tells the model which tool matches which kind of request", () => {
+    const prompt = buildSystemPrompt(films, null, { withSimilarSearch: true });
+
+    expect(prompt).toContain("find_similar_movies");
+    expect(prompt).toContain("names a film");
+    // The measured part: plot-shaped queries retrieve, category words do not.
+    expect(prompt).toContain("plot-style description");
+  });
+
+  it("warns against overselling a weak match", () => {
+    // The tool deliberately returns results even when nothing fits well, so the
+    // honesty has to live here rather than in a WHERE clause.
+    const prompt = buildSystemPrompt(films, null, { withSimilarSearch: true });
+    expect(prompt).toContain("similarity score");
+  });
+
+  it("never mentions the tool when it is not registered", () => {
+    // Naming a tool the model does not have is the same unsatisfiable
+    // instruction that sent it hunting for an empty now-showing list.
+    const prompt = buildSystemPrompt(films, null, { withSimilarSearch: false });
+    expect(prompt).not.toContain("find_similar_movies");
+  });
+
+  it("stays out of the no-tools retry prompt", () => {
+    const prompt = buildSystemPrompt(films, null, {
+      withTools: false,
+      withSimilarSearch: true,
+    });
+    expect(prompt).not.toContain("find_similar_movies");
+  });
+});

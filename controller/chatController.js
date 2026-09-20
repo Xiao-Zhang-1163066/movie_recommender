@@ -4,6 +4,7 @@ import { createGroq } from "@ai-sdk/groq";
 import { getNowShowing } from "./chatTools.js";
 import { buildTools } from "../services/agentTools.js";
 import { recordAgentRun } from "../services/agentRunService.js";
+import { hasEmbeddingSupport } from "../services/embeddingService.js";
 import {
   getOrCreateConversation,
   loadHistory,
@@ -27,7 +28,11 @@ const groq = createGroq({
 // literal drifting out of step would quietly mislabel which model produced a row.
 const CHAT_MODEL = "openai/gpt-oss-120b";
 
-export function buildSystemPrompt(nowShowing, summary, { withTools = true } = {}) {
+export function buildSystemPrompt(
+  nowShowing,
+  summary,
+  { withTools = true, withSimilarSearch = hasEmbeddingSupport() } = {},
+) {
   // The summary belongs here rather than in the message list. It is background
   // the assistant knows, not something anybody said, and faking it as a chat
   // turn invites the model to quote it back or treat it as the user's words.
@@ -56,6 +61,22 @@ export function buildSystemPrompt(nowShowing, summary, { withTools = true } = {}
 ${earlier}
   ${listing}
 `;
+
+  // Mentioned only when the tool is actually registered. Naming a tool the model
+  // does not have is the same unsatisfiable instruction that sent it hunting for
+  // an empty now-showing list — see docs/bugs-found.md entry 5.
+  const searchGuidance = withSimilarSearch
+    ? `
+  Choosing a search tool:
+  - The user names a film -> search_movies, which covers all of TMDB.
+  - The user describes the kind of film they want -> find_similar_movies, which searches the
+  local Christchurch catalogue. Pass a plot-style description written like a synopsis, not
+  genre labels. Add onlyInTheatres: true when they want something to watch tonight.
+  - find_similar_movies returns a similarity score with each film. If the best score is low,
+  nothing in the catalogue really fits — say so plainly rather than overselling the closest
+  match.
+`
+    : "";
 
   // The retry after an empty reply runs with no tools at all. It must not be
   // told it "MUST call recommend_movies", or it writes the tool call out as JSON
@@ -86,7 +107,7 @@ ${earlier}
   id and a one-sentence reason it fits what the user asked for. The reason is shown on the card.
   4. If nothing currently playing fits the request, say so honestly and recommend the closest
   real films that aren't in theatres — do not force an ill-fitting in-theatre pick.
-
+${searchGuidance}
   Response format — follow this order every time:
   1. Write your opening text first (1–2 short sentences framing the picks). Do not call any
   tools before writing this — it must stream to the user immediately.

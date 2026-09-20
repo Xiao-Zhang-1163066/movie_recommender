@@ -28,8 +28,9 @@ function okJson(body) {
 }
 
 describe("buildTools — the tool set", () => {
-  it("exposes exactly the seven tools the model is allowed to call", () => {
+  it("exposes exactly the eight tools the model is allowed to call", () => {
     expect(Object.keys(buildTools("u1")).sort()).toEqual([
+      "find_similar_movies",
       "get_movie_details",
       "get_showtimes",
       "get_taste_profile",
@@ -38,6 +39,20 @@ describe("buildTools — the tool set", () => {
       "recommend_movies",
       "search_movies",
     ]);
+  });
+
+  it("hides find_similar_movies entirely when there is no embedding key", () => {
+    // Absent, not present-and-failing. A tool that always throws still gets
+    // called, and every attempt spends one of the eight steps a turn is allowed.
+    const key = process.env.GEMINI_API_KEY;
+    delete process.env.GEMINI_API_KEY;
+    try {
+      expect(buildTools("u1")).not.toHaveProperty("find_similar_movies");
+      // Everything else must keep working without it.
+      expect(Object.keys(buildTools("u1"))).toContain("search_movies");
+    } finally {
+      process.env.GEMINI_API_KEY = key;
+    }
   });
 
   it("does not expose get_now_showing, which is pre-fetched into the prompt", () => {
@@ -77,6 +92,12 @@ describe("buildTools — input schemas", () => {
     expect(accepts("search_movies", {})).toBe(false);
     expect(accepts("get_movie_details", { movieId: "438631" })).toBe(true);
     expect(accepts("get_movie_details", {})).toBe(false);
+  });
+
+  it("find_similar_movies requires a description and makes the filter optional", () => {
+    expect(accepts("find_similar_movies", { description: "slow and dreamlike" })).toBe(true);
+    expect(accepts("find_similar_movies", { description: "x", onlyInTheatres: true })).toBe(true);
+    expect(accepts("find_similar_movies", {})).toBe(false);
   });
 
   it("get_showtimes requires a movieId and makes the date optional", () => {
@@ -161,6 +182,23 @@ describe("buildTools — wiring to implementations", () => {
     await buildTools("u1", { prisma }).get_showtimes.execute({ movieId: "m1" });
 
     expect(prisma.session.findMany.mock.calls[0][0].where).toEqual({ movieId: "m1" });
+  });
+
+  it("embeds the description once and defaults the theatre filter to false", async () => {
+    // The tool's schema makes onlyInTheatres optional, but findSimilarMovies
+    // builds SQL from it — undefined reaching the query would filter nothing
+    // while looking like it filtered.
+    const prisma = { $queryRaw: vi.fn().mockResolvedValue([]) };
+    const embedQuery = vi.fn().mockResolvedValue([0.1, 0.2]);
+
+    await buildTools("u1", { prisma, embedQuery }).find_similar_movies.execute({
+      description: "a heist inside someone's dreams",
+    });
+
+    expect(embedQuery).toHaveBeenCalledWith("a heist inside someone's dreams");
+    expect(prisma.$queryRaw).toHaveBeenCalledOnce();
+    // The bound values of the tagged template: the vector twice, then the flag.
+    expect(prisma.$queryRaw.mock.calls[0]).toContain(false);
   });
 
   it("forwards both the database and the network deps to recommend_movies", async () => {
