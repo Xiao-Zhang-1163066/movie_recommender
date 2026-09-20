@@ -1,5 +1,6 @@
 import { prisma as defaultPrisma } from "../config/db.js";
 import { cache as defaultCache } from "../config/redis.js";
+import { embedQuery as defaultEmbedQuery, toSqlVector } from "../services/embeddingService.js";
 
 export const TMDB_IMG_BASE = "https://image.tmdb.org/t/p/w500";
 
@@ -242,4 +243,68 @@ export async function getNowShowing({
   });
   await cache.set(CACHE_KEY, nowShowing, 300);
   return nowShowing;
+}
+
+// Ten is a retrieval budget, not a display limit. Every row here rides into the
+// model's context, and Sprint 2 measured what a fat payload costs per turn.
+const SIMILAR_LIMIT = 10;
+
+/**
+ * Semantic search over our own catalogue: vector recall, then a hard filter on
+ * reality. The complement to search_movies, which matches TMDB titles by
+ * keyword and cannot answer "something dreamlike and slow".
+ *
+ * Pre-filter, not post-filter. The tempting version takes the top 20 by
+ * similarity and then drops the ones with no session — with 21 of 75 films
+ * showing, that routinely returns an empty list for a question the database
+ * could easily answer. Putting the session check in the WHERE clause makes
+ * Postgres rank *within* the eligible set, so onlyInTheatres always yields the
+ * best available answer rather than possibly nothing.
+ *
+ * The cost, stated plainly: a pre-filter defeats the HNSW index, because the
+ * graph cannot be walked with an arbitrary predicate applied, so Postgres falls
+ * back to an exact scan of the filtered rows. At this size that is free — and
+ * at 75 rows it was choosing a sequential scan anyway.
+ */
+export async function findSimilarMovies(
+  description,
+  onlyInTheatres = false,
+  { prisma = defaultPrisma, embedQuery = defaultEmbedQuery } = {},
+) {
+  const vector = toSqlVector(await embedQuery(description));
+
+  const rows = await prisma.$queryRaw`
+    SELECT m."tmdbId", m.title, m."releaseYear", m.genres,
+           1 - (m.embedding <=> ${vector}::vector) AS similarity,
+           EXISTS (
+             SELECT 1 FROM "Session" s
+             WHERE s."movieId" = m.id AND s."startsAt" > now()
+           ) AS "inTheatre"
+    FROM "Movie" m
+    WHERE m.embedding IS NOT NULL
+      -- Rows without a TMDB id are unusable downstream: recommend_movies is
+      -- keyed on tmdbId, so returning one would invite the model to invent a
+      -- number or to cite a film it cannot then display.
+      AND m."tmdbId" IS NOT NULL
+      AND (
+        ${onlyInTheatres}::boolean IS NOT TRUE
+        OR EXISTS (
+          SELECT 1 FROM "Session" s
+          WHERE s."movieId" = m.id AND s."startsAt" > now()
+        )
+      )
+    ORDER BY m.embedding <=> ${vector}::vector
+    LIMIT ${SIMILAR_LIMIT}
+  `;
+
+  return rows.map((row) => ({
+    tmdbId: row.tmdbId,
+    title: row.title,
+    releaseYear: row.releaseYear,
+    genres: row.genres,
+    inTheatre: row.inTheatre,
+    // Three decimals is all the ordering information the model can use, and the
+    // other fourteen digits are tokens spent saying nothing.
+    similarity: Number(row.similarity.toFixed(3)),
+  }));
 }
