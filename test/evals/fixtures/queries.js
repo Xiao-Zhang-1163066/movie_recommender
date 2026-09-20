@@ -10,6 +10,11 @@
  *   null   — genuinely ambiguous, so not asserted. Asserting on a case where a
  *            reasonable model could go either way manufactures flakiness and
  *            teaches the team to ignore the suite.
+ *
+ * `expectTool` / `avoidTool` name a tool the turn must (or must not) call.
+ * Both are optional and simply unasserted when absent. They exist because the
+ * two search tools overlap by design — one covers TMDB by title, the other our
+ * own catalogue by meaning — and prose alone cannot tell you which was used.
  */
 export const QUERIES = [
   // --- vague mood -----------------------------------------------------------
@@ -42,6 +47,33 @@ export const QUERIES = [
   //     recommends is a judgement call, so it is left unasserted -------------
   { id: "watchlist-read", text: "what's on my watchlist?", shouldRecommend: null },
   { id: "watchlist-add", text: "add The Odyssey to my watchlist", shouldRecommend: null },
+
+  // --- semantic vs keyword search (Sprint 3) --------------------------------
+  // The same user, two shapes of question, two corpora. Asserting the tool
+  // rather than the wording is what makes this behavioural instead of a vibe
+  // check: a model that keyword-searches "dreamlike and slow" gets nothing back
+  // and then invents something plausible, which reads fine and is wrong.
+  {
+    id: "semantic-mood",
+    text: "I want something dreamlike and slow, about memory and loss",
+    shouldRecommend: true,
+    expectTool: "find_similar_movies",
+    avoidTool: "search_movies",
+  },
+  {
+    id: "semantic-tonight",
+    text: "something funny I can actually see in a cinema tonight",
+    shouldRecommend: true,
+    expectTool: "find_similar_movies",
+  },
+  // The reverse direction. A named film is a title lookup, and reaching for the
+  // vector search here would search 75 local rows for something TMDB knows.
+  {
+    id: "keyword-named-film",
+    text: "how long is The Odyssey?",
+    shouldRecommend: null,
+    avoidTool: "find_similar_movies",
+  },
 
   // --- must NOT recommend ---------------------------------------------------
   // A model that answers every prompt with film cards is as broken as one that

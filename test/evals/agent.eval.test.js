@@ -59,6 +59,21 @@ function makeFakePrisma() {
       update: async (args) => ({ id: "wl-1", ...args?.data }),
       upsert: async (args) => ({ id: "wl-1", ...args?.create }),
     },
+    // find_similar_movies runs raw SQL, so the fake has to answer $queryRaw as
+    // well as the model-level methods — without this the tool throws the moment
+    // the model reaches for it, and the eval would read as a model failure.
+    // Returning ids from the frozen listing keeps the downstream
+    // recommend_movies path honest: an invented id 404s at TMDB and looks
+    // exactly like a hallucination the model never actually made.
+    $queryRaw: async () =>
+      NOW_SHOWING.slice(0, 5).map((m, i) => ({
+        tmdbId: m.tmdbId,
+        title: m.title,
+        releaseYear: 2026,
+        genres: m.genres,
+        similarity: Number((0.72 - i * 0.02).toFixed(3)),
+        inTheatre: true,
+      })),
     session: { findMany: async () => [] },
     cinema: { findMany: async () => [] },
     user: { findUnique: async () => ({ id: TEST_USER_ID, name: "Eval" }) },
@@ -151,7 +166,14 @@ async function runQuery(query) {
     checks.oneShowing = cards.some((c) => NOW_SHOWING_IDS.has(c.tmdbId));
   }
 
-  // 4. The user was not left staring at silence.
+  // 4. Reached for the right search tool. The two overlap by design — one
+  //    searches TMDB by title, the other our own catalogue by meaning — so what
+  //    this catches is the model keyword-searching a mood, or semantic-searching
+  //    a title it was handed verbatim.
+  if (query.expectTool) checks.usedExpectedTool = names.includes(query.expectTool);
+  if (query.avoidTool) checks.avoidedTool = !names.includes(query.avoidTool);
+
+  // 5. The user was not left staring at silence.
   checks.producedText = producedText(steps);
 
   return { id: query.id, tools: names, cardCount: cards.length, checks };
@@ -168,6 +190,15 @@ async function runQuery(query) {
 // Re-measure and move this whenever the prompt or the tool descriptions change.
 const PASS_RATE_GATE = 0.75;
 
+// Milliseconds to wait between queries, sized from the measured ceiling rather
+// than guessed: Groq's free tier allows 8,000 tokens per minute (the headers
+// report a bucket that refills in under a second, so it is a per-minute limit,
+// not a daily one). A single eval turn resends the system prompt and all eight
+// tool schemas on every one of up to eight steps, which costs thousands of
+// tokens — so the sustainable rate is roughly one query per minute, and a full
+// run takes about half an hour. Lower it only against a paid key.
+const DELAY_MS = Number(process.env.EVAL_DELAY_MS ?? 30_000);
+
 describe("agent behaviour evals", () => {
   it(
     `passes at least ${PASS_RATE_GATE * 100}% of behavioural checks`,
@@ -176,13 +207,40 @@ describe("agent behaviour evals", () => {
       // EVAL_LIMIT=1 runs a single query. Twenty live turns is an expensive way
       // to discover a typo, so smoke the wiring first, then run the full set.
       const limit = Number(process.env.EVAL_LIMIT) || QUERIES.length;
+      // EVAL_ONLY=semantic-mood,keyword-named-film runs exactly those cases.
+      // EVAL_LIMIT takes a prefix, which is the wrong instrument when the cases
+      // you need to check were appended near the end: re-running twenty live
+      // turns to reach three of them is how the quota got exhausted in the first
+      // place.
+      const only = process.env.EVAL_ONLY?.split(",")
+        .map((id) => id.trim())
+        .filter(Boolean);
+      const selected = only?.length
+        ? QUERIES.filter((q) => only.includes(q.id))
+        : QUERIES.slice(0, limit);
       // Sequential: twenty concurrent runs would risk Groq rate limits, and a
       // 429 would look like a behavioural failure rather than a quota one.
-      for (const query of QUERIES.slice(0, limit)) {
+      for (const query of selected) {
+        // Spacing, not politeness. A full run on 2026-09-20 exhausted the quota
+        // after twelve queries and the remaining eleven all died with a 429
+        // carrying retry-after: 248s — including every Sprint 3 case, so the run
+        // proved nothing about the thing it was written to test. Pausing between
+        // turns is the cheapest way to stop a quota failure being recorded as
+        // model behaviour.
+        if (results.length) await new Promise((r) => setTimeout(r, DELAY_MS));
         try {
           results.push(await runQuery(query));
         } catch (error) {
-          results.push({ id: query.id, error: String(error).slice(0, 120), checks: {} });
+          // checks:{} was the original shape, and it made an outage look like an
+          // improvement: the denominator below is built from the checks that
+          // exist, so a query that never ran simply left the sample. The run
+          // that found this scored 75% and went green with eleven queries dead.
+          // A failure must push the rate down, never up.
+          results.push({
+            id: query.id,
+            error: String(error).slice(0, 120),
+            checks: { ran: false },
+          });
         }
       }
 
@@ -204,8 +262,19 @@ describe("agent behaviour evals", () => {
             `\n${"".padEnd(26)}tools: [${(r.tools ?? []).join(", ")}] cards: ${r.cardCount ?? 0}`,
         );
       }
+      const errored = results.filter((r) => r.error).length;
       console.log(
-        `\n  checks passed: ${passed}/${flat.length}  =  ${(rate * 100).toFixed(1)}%\n`,
+        `\n  checks passed: ${passed}/${flat.length}  =  ${(rate * 100).toFixed(1)}%` +
+          `\n  queries that never reached the model: ${errored}/${results.length}` +
+          (errored
+            ? "\n  NOT A VALID BASELINE — part of the suite never ran, so this rate describes" +
+              "\n  a partial sample. Fix the cause and re-run before recording it.\n"
+            : "\n") +
+          // A subset is for diagnosis, not calibration. Recording one as the
+          // baseline would move the gate against a different set of questions.
+          (selected.length < QUERIES.length
+            ? `  PARTIAL SELECTION — ${selected.length}/${QUERIES.length} queries. Diagnostic only, not a baseline.\n`
+            : ""),
       );
 
       // Written unconditionally, because vitest hides a passing test's stdout —
@@ -214,7 +283,7 @@ describe("agent behaviour evals", () => {
       writeFileSync(
         new URL("./results.json", import.meta.url),
         JSON.stringify(
-          { ranAt: new Date().toISOString(), rate, passed, total: flat.length, results },
+          { ranAt: new Date().toISOString(), rate, passed, total: flat.length, errored, results },
           null,
           2,
         ),
