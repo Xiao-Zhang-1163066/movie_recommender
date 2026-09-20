@@ -27,3 +27,22 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           TMDB_API_KEY: ${{ secrets.VITE_TMDB_API_KEY }}
         run: python run.py
+
+      # The scraper inserts films but cannot embed them: the embedding text is
+      # defined once, in services/embeddingService.js, and duplicating it in
+      # Python would be a second definition free to drift from the first.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      # Unchanged films cost nothing here — embeddingHash means only what the
+      # scraper just inserted or changed is sent to Gemini.
+      - name: Embed new movies
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: npm run embed:backfill
