@@ -4,3 +4,6 @@ node_modules
 /generated/prisma
 LEARNINGS.md
 docs/
+
+# Eval run output — local baseline record, not a repo artifact
+test/evals/results.json
