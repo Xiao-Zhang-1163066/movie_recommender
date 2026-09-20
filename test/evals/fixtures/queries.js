@@ -60,11 +60,18 @@ export const QUERIES = [
     expectTool: "find_similar_movies",
     avoidTool: "search_movies",
   },
+  // No expectTool, and that absence is the finding. This case originally
+  // demanded find_similar_movies; a real run answered it correctly with no
+  // search tool at all, straight from the now-showing listing in the system
+  // prompt — which carries genres, and is pre-fetched precisely so the model
+  // does not spend a round-trip on data it already holds. Asserting a tool call
+  // here would contradict a deliberate design decision, so the assertion went
+  // rather than the design. Retrieval is tested by semantic-mood, where the
+  // request is a mood that genre labels cannot express.
   {
     id: "semantic-tonight",
     text: "something funny I can actually see in a cinema tonight",
     shouldRecommend: true,
-    expectTool: "find_similar_movies",
   },
   // The reverse direction. A named film is a title lookup, and reaching for the
   // vector search here would search 75 local rows for something TMDB knows.

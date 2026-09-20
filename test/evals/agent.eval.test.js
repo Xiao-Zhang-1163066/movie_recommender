@@ -188,6 +188,17 @@ async function runQuery(query) {
 // failed a smoke run and passed the full one — so a gate at the observed rate
 // would go red on noise. 0.75 still trips if a prompt change costs ~7 checks.
 // Re-measure and move this whenever the prompt or the tool descriptions change.
+//
+// STALE as of 2026-09-21. Sprint 3 changed both: the system prompt gained a
+// search-tool guidance block, search_movies was reworded, an eighth tool was
+// added, and three queries plus two check types joined the corpus. The 86.4%
+// baseline therefore describes a prompt that no longer exists, and 0.75 is
+// calibrated against it.
+//
+// The attempt to re-measure ran out of Groq's daily token budget (200,000 for
+// this model) partway through, so it has not been re-derived. Until a full run
+// completes, treat a pass here as weak evidence: run `npm run test:evals`,
+// take the printed rate as the new baseline, and set this a little below it.
 const PASS_RATE_GATE = 0.75;
 
 // Milliseconds to wait between queries. Modest on purpose: spacing helps with
