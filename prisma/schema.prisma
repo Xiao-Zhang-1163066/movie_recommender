@@ -14,47 +14,58 @@ datasource db {
 }
 
 model User {
-  id       String   @id @default(uuid())
-  name     String
-  email    String   @unique
-  password String
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  password  String
   createdAt DateTime @default(now())
 
-  movies   Movie[]  @relation("MovieCreator") // Relation to movies created by the user
+  movies         Movie[]         @relation("MovieCreator") // Relation to movies created by the user
   watchlistItems WatchlistItem[]
-  conversations Conversation[]
+  conversations  Conversation[]
 }
 
 model Movie {
-  id          String   @id @default(uuid())
-  tmdbId      Int?     @unique
-  title       String
-  overview    String?
-  releaseYear Int
-  genres      String[] @default([])
-  runtime     Int?
-  voteAverage Float?
-  posterUrl   String?
-  createdBy   String
-  createdAt   DateTime @default(now())
-  creator    User     @relation("MovieCreator",fields: [createdBy], references: [id], onDelete: Cascade) // Ensure that if a user is deleted, the corresponding movies are also deleted
+  id             String                      @id @default(uuid())
+  tmdbId         Int?                        @unique
+  title          String
+  overview       String?
+  releaseYear    Int
+  genres         String[]                    @default([])
+  runtime        Int?
+  voteAverage    Float?
+  posterUrl      String?
+  // Semantic search vector over title + genres + overview. Prisma has no vector
+  // type, so `Unsupported` lets migrate own the column while keeping it out of
+  // the generated client — every read and write of it is raw SQL.
+  // 768 dimensions, not the model's full 3072: gemini-embedding-001 is a
+  // Matryoshka model, so a truncated prefix is still a usable embedding at a
+  // quarter of the storage and index size.
+  embedding      Unsupported("vector(768)")?
+  // sha256 of the exact text that was embedded. Re-running the backfill is then
+  // free for unchanged rows, and an overview edited on TMDB re-embeds itself.
+  embeddingHash  String?
+  embeddedAt     DateTime?
+  createdBy      String
+  createdAt      DateTime                    @default(now())
+  creator        User                        @relation("MovieCreator", fields: [createdBy], references: [id], onDelete: Cascade) // Ensure that if a user is deleted, the corresponding movies are also deleted
   watchlistItems WatchlistItem[]
-  sessions    Session[]
+  sessions       Session[]
 }
 
 model WatchlistItem {
-  id        String   @id @default(uuid())
+  id        String          @id @default(uuid())
   userId    String
   movieId   String
-  status    WatchlistStatus @default(PLANNED)   
+  status    WatchlistStatus @default(PLANNED)
   rating    Int? // User rating for the movie (1-10)
   notes     String? // User notes about the movie
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now())
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @default(now())
 
   //relations
   user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  movie Movie @relation(fields: [movieId], references: [id], onDelete: Cascade)// Ensure that if a user or movie is deleted, the corresponding watchlist items are also deleted
+  movie Movie @relation(fields: [movieId], references: [id], onDelete: Cascade) // Ensure that if a user or movie is deleted, the corresponding watchlist items are also deleted
 
   @@unique([userId, movieId]) // Ensure a user can only have one entry per movie in their watchlist
 }
@@ -66,35 +77,35 @@ enum WatchlistStatus {
   DROPPED
 }
 
-model Cinema {                                                                                
+model Cinema {
   id         String    @id @default(uuid())
   // cinema display name
   name       String
   // URL-safe identifier, must be unique                                                        
-  slug       String     @unique
+  slug       String    @unique
   // street address                                                                             
-  address    String                                                                              
+  address    String
   // Christchurch suburb                                                                        
-  suburb     String                                                                              
+  suburb     String
   // map coordinates
-  latitude   Float  
+  latitude   Float
   longitude  Float
   // where users go to browse / buy tickets                                                     
   websiteUrl String
-  bookingUrl String?       // optional — not all cinemas have a direct booking page                 
+  bookingUrl String? // optional — not all cinemas have a direct booking page                 
   // where the scraper pulls showtime data from                                                 
-  scrapeUrl  String                                                                                
+  scrapeUrl  String
   // default to NZ timezone                                                                     
-  timezone   String    @default("Pacific/Auckland")                                           
+  timezone   String    @default("Pacific/Auckland")
   // soft-disable a cinema without deleting it                                                  
-  isActive   Boolean   @default(true)                                                           
+  isActive   Boolean   @default(true)
   createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt                                                               
+  updatedAt  DateTime  @updatedAt
   // relation field — list of all sessions at this cinema                                     
-  sessions   Session[]                                                                                 
-  }    
+  sessions   Session[]
+}
 
-  model Session {
+model Session {
   id              String   @id @default(uuid())
   // foreign keys
   cinemaId        String
@@ -107,15 +118,16 @@ model Cinema {
   seatsTotal      Int?
   seatsRemaining  Int?
   // direct link to this specific session's booking page
-  bookingUrl      String?      // optional
+  bookingUrl      String? // optional
   // the cinema's own internal ID for this session (for deep-linking)
-  sourceSessionId String?      // optional
+  sourceSessionId String? // optional
   scrapedAt       DateTime @default(now())
   createdAt       DateTime @default(now())
   // relation back to Cinema
-  cinema          Cinema     @relation(fields: [cinemaId], references: [id], onDelete: Cascade)
+  cinema          Cinema   @relation(fields: [cinemaId], references: [id], onDelete: Cascade)
   // relation back to Movie
-  movie           Movie      @relation(fields: [movieId], references: [id], onDelete: Cascade)
+  movie           Movie    @relation(fields: [movieId], references: [id], onDelete: Cascade)
+
   // indexes for fast lookups
   @@index([movieId, startsAt])
   @@index([cinemaId, startsAt])
@@ -182,27 +194,27 @@ enum ChatRole {
 // One row per agent turn, written after the reply has been sent.
 // Without this, everything we know about a turn is lost the moment it ends.
 model AgentRun {
-  id     String @id @default(uuid())
-  userId String
-  model  String
+  id             String   @id @default(uuid())
+  userId         String
+  model          String
   // Nullable, not 0: a turn that failed before the model answered reported no
   // token counts at all, and storing 0 would look like a free turn instead.
-  inputTokens  Int?
-  outputTokens Int?
+  inputTokens    Int?
+  outputTokens   Int?
   // Tool names in call order, duplicates kept. The order is the point:
   // "search_movies" eight times running is the signature of a model stuck in a
   // loop, and a count or a de-duplicated set would hide exactly that.
-  toolCalls    String[] @default([])
-  steps        Int?
-  finishReason String?
+  toolCalls      String[] @default([])
+  steps          Int?
+  finishReason   String?
   // True when the first attempt produced no text and the no-tools retry ran.
   // Worth its own column because a retry is invisible to the user but is a
   // second model call, so a rising retry rate is a rising bill.
-  retried      Boolean  @default(false)
-  errored      Boolean  @default(false)
+  retried        Boolean  @default(false)
+  errored        Boolean  @default(false)
   // The same classification the user was shown ("rate_limit", "daily_limit",
   // "context_limit", "general"), so a spike here lines up with complaints.
-  errorKind    String?
+  errorKind      String?
   // Loose reference, deliberately no foreign key. This is an append-only log,
   // and a cascade from Conversation would delete the very history it exists to
   // preserve.
