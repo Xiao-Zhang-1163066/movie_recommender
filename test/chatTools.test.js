@@ -10,7 +10,7 @@ vi.mock("../config/redis.js", () => ({
   cache: { get: vi.fn(), set: vi.fn(), del: vi.fn() },
 }));
 
-const { searchMovies, getTasteProfile, markWatched } = await import(
+const { searchMovies, getTasteProfile, markWatched, findSimilarMovies } = await import(
   "../controller/chatTools.js"
 );
 
@@ -176,6 +176,80 @@ describe("markWatched tool", () => {
         rating: 9,
         notes: "Loved it!",
       },
+    });
+  });
+});
+
+describe("findSimilarMovies tool", () => {
+  // $queryRaw is a tagged template, so a spy receives the strings array first
+  // and every interpolated value after it. Asserting on those bound values is
+  // the only way to check a raw query without a database.
+  const boundValues = (spy) => spy.mock.calls[0].slice(1);
+
+  function fakePrisma(rows = []) {
+    return { $queryRaw: vi.fn().mockResolvedValue(rows) };
+  }
+
+  it("embeds the description once and binds that vector to the query", async () => {
+    const prisma = fakePrisma();
+    const embedQuery = vi.fn().mockResolvedValue([0.6, 0.8]);
+
+    await findSimilarMovies("a heist inside someone's dreams", false, { prisma, embedQuery });
+
+    expect(embedQuery).toHaveBeenCalledOnce();
+    expect(embedQuery).toHaveBeenCalledWith("a heist inside someone's dreams");
+    // Once for the score in the SELECT, once for the ORDER BY. Both must be the
+    // same vector, or the rows would be ranked by a different query than the one
+    // whose similarity is reported.
+    expect(boundValues(prisma.$queryRaw).filter((v) => v === "[0.6,0.8]")).toHaveLength(2);
+  });
+
+  it("passes the theatre filter through as a real boolean", async () => {
+    const prisma = fakePrisma();
+    const embedQuery = vi.fn().mockResolvedValue([1, 0]);
+
+    await findSimilarMovies("something funny", true, { prisma, embedQuery });
+    expect(boundValues(prisma.$queryRaw)).toContain(true);
+
+    const unfiltered = fakePrisma();
+    await findSimilarMovies("something funny", false, { prisma: unfiltered, embedQuery });
+    expect(boundValues(unfiltered.$queryRaw)).toContain(false);
+  });
+
+  it("caps how many rows can reach the model's context", async () => {
+    // Every returned row rides into the prompt, so the limit is a token budget
+    // rather than a display choice.
+    const prisma = fakePrisma();
+    await findSimilarMovies("anything", false, { prisma, embedQuery: vi.fn().mockResolvedValue([1]) });
+
+    expect(boundValues(prisma.$queryRaw)).toContain(10);
+  });
+
+  it("rounds similarity and returns only the fields a recommendation needs", async () => {
+    const prisma = fakePrisma([
+      {
+        tmdbId: 27205,
+        title: "Inception",
+        releaseYear: 2010,
+        genres: ["Science Fiction"],
+        similarity: 0.7345678901234,
+        inTheatre: false,
+      },
+    ]);
+
+    const [row] = await findSimilarMovies("dreams", false, {
+      prisma,
+      embedQuery: vi.fn().mockResolvedValue([1]),
+    });
+
+    // The remaining digits are tokens that carry no ordering information.
+    expect(row).toEqual({
+      tmdbId: 27205,
+      title: "Inception",
+      releaseYear: 2010,
+      genres: ["Science Fiction"],
+      inTheatre: false,
+      similarity: 0.735,
     });
   });
 });
