@@ -190,14 +190,21 @@ async function runQuery(query) {
 // Re-measure and move this whenever the prompt or the tool descriptions change.
 const PASS_RATE_GATE = 0.75;
 
-// Milliseconds to wait between queries, sized from the measured ceiling rather
-// than guessed: Groq's free tier allows 8,000 tokens per minute (the headers
-// report a bucket that refills in under a second, so it is a per-minute limit,
-// not a daily one). A single eval turn resends the system prompt and all eight
-// tool schemas on every one of up to eight steps, which costs thousands of
-// tokens — so the sustainable rate is roughly one query per minute, and a full
-// run takes about half an hour. Lower it only against a paid key.
-const DELAY_MS = Number(process.env.EVAL_DELAY_MS ?? 30_000);
+// Milliseconds to wait between queries. Modest on purpose: spacing helps with
+// the per-minute bucket, but it is NOT what limits this suite.
+//
+// The binding constraint is Groq's free-tier **tokens per day** — 200,000 for
+// openai/gpt-oss-120b. The response headers only ever describe the per-minute
+// bucket, so a TPD rejection arrives as a 429 alongside
+// `x-ratelimit-remaining-tokens: 8000` — a full bucket next to a refusal. Read
+// error.responseBody, not the headers; only the body names the limit that was
+// actually hit.
+//
+// One eval turn re-sends the system prompt and all eight tool schemas on every
+// step, so a full 23-query run costs on the order of a hundred thousand tokens.
+// That is one, maybe two full runs per day on the free tier. Use EVAL_ONLY to
+// check specific cases and save the full run for recording a baseline.
+const DELAY_MS = Number(process.env.EVAL_DELAY_MS ?? 10_000);
 
 describe("agent behaviour evals", () => {
   it(
