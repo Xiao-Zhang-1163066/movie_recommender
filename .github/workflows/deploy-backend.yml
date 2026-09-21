@@ -23,6 +23,13 @@ on:
       - vitest.config.js
       - Dockerfile
       - package*.json
+      # The workflow's own definition. Omitting it meant a commit that changed
+      # only this file could not deploy itself — proven the hard way on
+      # 2026-09-21: the fix that added --revision-suffix was pushed, triggered
+      # nothing, and had to be applied by hand with `az containerapp update`.
+      # Note the ordering trap this creates: a commit touching only .github
+      # still cannot take effect until THIS entry is already live on main.
+      - .github/workflows/**
 
 jobs:
   deploy:
