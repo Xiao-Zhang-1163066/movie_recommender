@@ -27,8 +27,12 @@ on:
       # only this file could not deploy itself — proven the hard way on
       # 2026-09-21: the fix that added --revision-suffix was pushed, triggered
       # nothing, and had to be applied by hand with `az containerapp update`.
-      # Note the ordering trap this creates: a commit touching only .github
-      # still cannot take effect until THIS entry is already live on main.
+      #
+      # Adding it has no chicken-and-egg problem, contrary to what this comment
+      # first claimed: a push event is filtered using the workflow definition
+      # *from the pushed commit*, so the commit that adds this line is matched
+      # by it. Measured rather than reasoned about — c611a2f changed only this
+      # file and did trigger a run.
       - .github/workflows/**
 
 jobs:
