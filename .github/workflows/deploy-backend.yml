@@ -70,9 +70,22 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+      # --revision-suffix is what actually ships the new code, and it is not
+      # cosmetic. The image tag is always ":latest", so without it this command
+      # submits a template identical to the running one, Container Apps sees no
+      # change, no revision is created, and the old image keeps serving — while
+      # the workflow still reports success because `az` itself succeeded.
+      #
+      # Observed on 2026-09-21: run for bb71b17 went green at 03:02:38Z, the
+      # image reached ACR at 03:04:01Z, and the serving revision was still the
+      # one created at 03:00:32Z. A green deploy that shipped nothing.
+      #
+      # github.run_number is monotonic, so each run gets a unique suffix; a
+      # repeated suffix is rejected outright.
       - name: Update Container App
         run: |
           az containerapp update \
             --name movie-mate-api \
             --resource-group ai-movie-mate-rg \
-            --image moviemate.azurecr.io/movie-mate-api:latest
+            --image moviemate.azurecr.io/movie-mate-api:latest \
+            --revision-suffix r${{ github.run_number }}
