@@ -9,6 +9,11 @@ on:
       - app.js
       - routes/**
       - controller/**
+      # Added late: services/ arrived in Sprint 1 and was missing here, so a
+      # change confined to conversationService, agentTools or embeddingService
+      # built and tested green and then never shipped. Any new top-level source
+      # directory has to be added to this list or it is silently undeployable.
+      - services/**
       - middleware/**
       - validators/**
       - utils/**
