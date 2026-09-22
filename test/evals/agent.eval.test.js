@@ -189,17 +189,18 @@ async function runQuery(query) {
 // would go red on noise. 0.75 still trips if a prompt change costs ~7 checks.
 // Re-measure and move this whenever the prompt or the tool descriptions change.
 //
-// STALE as of 2026-09-21. Sprint 3 changed both: the system prompt gained a
-// search-tool guidance block, search_movies was reworded, an eighth tool was
-// added, and three queries plus two check types joined the corpus. The 86.4%
-// baseline therefore describes a prompt that no longer exists, and 0.75 is
-// calibrated against it.
+// Re-derived 2026-09-22 after Sprint 3: **88.4% (61/69 checks), 0 errored** —
+// the first run where every query actually reached the model, which is what
+// makes it the first trustworthy baseline. The previous 86.4% figure predates
+// the search-guidance prompt block, the reworded search_movies, and the eighth
+// tool.
 //
-// The attempt to re-measure ran out of Groq's daily token budget (200,000 for
-// this model) partway through, so it has not been re-derived. Until a full run
-// completes, treat a pass here as weak evidence: run `npm run test:evals`,
-// take the printed rate as the new baseline, and set this a little below it.
-const PASS_RATE_GATE = 0.75;
+// Raised 0.75 -> 0.80. Still set below the measured rate, because individual
+// queries genuinely flip between runs, but close enough that losing ~6 checks
+// turns it red. Note that the 88.4% already includes semantic-mood failing its
+// tool-choice checks, so fixing that should push the measured rate up, not
+// down — re-measure and raise this again if it does.
+const PASS_RATE_GATE = 0.8;
 
 // Milliseconds to wait between queries. Modest on purpose: spacing helps with
 // the per-minute bucket, but it is NOT what limits this suite.
