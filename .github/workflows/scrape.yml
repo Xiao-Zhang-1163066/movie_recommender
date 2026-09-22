@@ -39,6 +39,15 @@ jobs:
       - name: Install Node dependencies
         run: npm ci
 
+      # generated/prisma is gitignored, so it does not exist after a fresh
+      # checkout and nothing can import config/db.js without it.
+      # deploy-backend.yml has always had this step; omitting it here is exactly
+      # why the first scheduled run of the embed step died with
+      # ERR_MODULE_NOT_FOUND on generated/prisma/index.js. The scrape step above
+      # is Python and never needed it, which is what made the gap easy to miss.
+      - name: Generate Prisma client
+        run: npx prisma generate
+
       # Unchanged films cost nothing here — embeddingHash means only what the
       # scraper just inserted or changed is sent to Gemini.
       - name: Embed new movies
