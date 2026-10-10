@@ -93,6 +93,52 @@ describe("searchMovies tool", () => {
     expect(fakeFetch).not.toHaveBeenCalled();
     expect(cache.set).not.toHaveBeenCalled();
   });
+
+  it("caps the rows, because each one is spent from the model's context", async () => {
+    // TMDB returns up to 20 per page and the old code passed all of them on.
+    // Measured: six searches in one turn came to 6,282 tokens and tipped the
+    // request over Groq's 8,000 TPM limit, which ends the turn outright.
+    const twenty = Array.from({ length: 20 }, (_, i) => ({
+      id: i,
+      title: `Film ${i}`,
+      release_date: "2024-01-01",
+      overview: "Blurb.",
+    }));
+    const fakeFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ results: twenty }),
+    });
+
+    const results = await searchMovies("anything", {
+      fetchFn: fakeFetch,
+      cache: missingCache(),
+      apiKey: "test-key",
+    });
+
+    expect(results).toHaveLength(5);
+    // Relevance order is TMDB's, so the cap must keep the head of the list.
+    expect(results[0].id).toBe(0);
+    // overview deliberately survives: the model reads it to choose a film, and
+    // it is the row count, not the blurb, that was free to cut.
+    expect(results[0].overview).toBe("Blurb.");
+  });
+
+  it("versions the cache key, so a capped payload cannot be served from an uncapped cache", async () => {
+    const cache = { get: vi.fn().mockResolvedValue(null), set: vi.fn() };
+    const fakeFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ results: [] }),
+    });
+
+    await searchMovies("Dune", { fetchFn: fakeFetch, cache, apiKey: "test-key" });
+
+    // The shape of a cached value is part of its identity. Without the bump,
+    // Redis would keep answering with 20-row payloads for an hour after deploy.
+    expect(cache.get.mock.calls[0][0]).toContain("v2");
+    expect(cache.set.mock.calls[0][0]).toContain("v2");
+  });
 });
 
 describe("getTasteProfile tool", () => {

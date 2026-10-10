@@ -100,6 +100,19 @@ export async function markWatched(
   return { success: true };
 }
 
+// Every row returned here lands in the model's context, so this is a token
+// budget, not a page size. Measured on 2026-10-10: six real searches during one
+// turn returned 66 rows totalling 6,282 tokens — 76% of the 8,210-token request
+// that then blew Groq's 8,000 TPM ceiling and killed the turn. Capping at five
+// brings the same turn to ~4,081.
+//
+// Only the count is capped; overview is left intact. It is tempting to drop it
+// (that would save 93% rather than 66%) but the sole consumer of this result is
+// the model, and overview is what it reads to judge which film fits the request.
+// TMDB orders by relevance, so rows 6-20 are noise — searching "inception"
+// returns "Bikini Inception" — which makes the count the part that is free to cut.
+const SEARCH_RESULT_LIMIT = 5;
+
 export async function searchMovies(
   query,
   {
@@ -108,14 +121,17 @@ export async function searchMovies(
     apiKey = process.env.TMDB_API_KEY,
   } = {},
 ) {
-  const cacheKey = `tmdb:search:${query.toLowerCase()}`;
+  // :v2 — the shape changed when the row count was capped. Reusing the key
+  // would serve 20-row payloads for another hour out of a cache that looks
+  // perfectly healthy, which is the trap now_showing:v2 was bumped for.
+  const cacheKey = `tmdb:search:v2:${query.toLowerCase()}`;
   let results = await cache.get(cacheKey);
   if (!results) {
     const data = await fetchWithRetry(
       `https://api.themoviedb.org/3/search/movie?api_key=${apiKey}&query=${encodeURIComponent(query)}`,
       { fetchFn },
     ).then((res) => res.json());
-    results = data.results.map((movie) => ({
+    results = data.results.slice(0, SEARCH_RESULT_LIMIT).map((movie) => ({
       id: movie.id,
       title: movie.title,
       release_date: movie.release_date,
