@@ -130,6 +130,60 @@ describe("chat() — what reaches the run log", () => {
     expect(loggedRow()).toMatchObject({ retried: true, errored: false });
   });
 
+  it("absorbs an oversized request with the no-tools retry, without telling the user", async () => {
+    // The real Groq shape, and the reason branch order matters: the message says
+    // "Request too large" while the body's code is rate_limit_exceeded. If the
+    // 429 check is ever moved above the 413 one, errorKind below flips to
+    // "rate_limit" and the user gets told to wait — for a request that will fail
+    // identically forever, because waiting does not shrink a request.
+    const tooLarge = Object.assign(
+      new Error(
+        "Request too large for model `openai/gpt-oss-120b` on tokens per minute (TPM): Limit 8000, Requested 8210",
+      ),
+      {
+        statusCode: 413,
+        responseBody: '{"error":{"code":"rate_limit_exceeded","type":"tokens"}}',
+      },
+    );
+
+    streamText
+      .mockImplementationOnce(fakeRun([{ type: "error", error: tooLarge }]))
+      .mockImplementationOnce(
+        fakeRun([{ type: "text-delta", text: "A shorter answer." }]),
+      );
+
+    const res = fakeRes();
+    await chat(req(), res, vi.fn());
+
+    // No error line: the fallback answered, and an error followed by a good
+    // answer reads as a bug.
+    expect(res.written.some((l) => l.t === "error")).toBe(false);
+    expect(res.written.some((l) => l.t === "text" && l.v.includes("shorter"))).toBe(true);
+    // errored stays false because the user got an answer; errorKind still
+    // records it, so the log shows how many turns the fallback is carrying.
+    expect(loggedRow()).toMatchObject({
+      retried: true,
+      errored: false,
+      errorKind: "request_too_large",
+    });
+  });
+
+  it("names a way out when even the smaller retry produces nothing", async () => {
+    const tooLarge = Object.assign(new Error("Request too large"), { statusCode: 413 });
+
+    streamText
+      .mockImplementationOnce(fakeRun([{ type: "error", error: tooLarge }]))
+      .mockImplementationOnce(fakeRun([]));
+
+    const res = fakeRes();
+    await chat(req(), res, vi.fn());
+
+    // Deliberately not the generic "I got stuck" line — that one invites the
+    // user to retry the same oversized request.
+    const texts = res.written.filter((l) => l.t === "text").map((l) => l.v).join(" ");
+    expect(texts).toContain("start a new chat");
+  });
+
   it("logs only after the response has been closed", async () => {
     // The reason this is fire-and-forget: a log write must never sit in front
     // of the reply the user is waiting for.

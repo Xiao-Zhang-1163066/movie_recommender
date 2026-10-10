@@ -123,6 +123,16 @@ function classifyModelError(err) {
   const combined = msg + " " + body;
   const status = err?.statusCode ?? err?.status;
 
+  // Ordered before the 429 branch deliberately. A 413 body also contains
+  // "rate_limit_exceeded" (Groq: "Request too large ... on tokens per minute
+  // (TPM): Limit 8000, Requested 8210"), so the rate-limit check below matches
+  // it first and tells the user to try again shortly — for a request that will
+  // fail identically forever, because waiting does not shrink a request. The
+  // two errors share a keyword, so order is what makes this correct.
+  if (status === 413 || combined.includes("request too large")) {
+    return "request_too_large";
+  }
+
   if (status === 429 || combined.includes("rate_limit") || combined.includes("rate limit")) {
     if (combined.includes("daily") || combined.includes("per day")) return "daily_limit";
     return "rate_limit";
@@ -209,6 +219,9 @@ const MODEL_ERROR_MESSAGES = {
   rate_limit: "The AI service is temporarily at capacity. Please try again shortly.",
   daily_limit: "The AI service has reached its daily limit. Please try again tomorrow.",
   context_limit: "This conversation is too long for me to continue. Please start a new chat.",
+  // Only reaches the user when the smaller retry below also failed; normally a
+  // 413 is absorbed silently by the no-tools fallback.
+  request_too_large: "That turn needed more room than the model allows. Please start a new chat, or ask for fewer films at once.",
   general: "The assistant ran into a problem.",
 };
 
@@ -305,6 +318,10 @@ export const chat = async (req, res, next) => {
     // below is for a turn that ran cleanly but said nothing; retrying a turn that
     // already told the user it failed would just spend quota and confuse them.
     let streamFailed = false;
+    // A 413 is not a general failure: it is the one error a retry can fix,
+    // provided the retry is a *smaller* request. Kept apart from streamFailed
+    // so the no-tools fallback below is allowed to take over.
+    let oversized = false;
     // Both end up on the log row. errorKind is the same classification the user
     // is shown, so a spike here lines up with complaints; retried marks a turn
     // that quietly cost two model calls instead of one.
@@ -338,9 +355,25 @@ export const chat = async (req, res, next) => {
           // The SDK surfaces model/tool failures as a stream part rather than
           // throwing — classify and forward so the client can show targeted help.
           console.error("Chat fullStream error part:", part.error);
-          streamFailed = true;
           const kind = classifyModelError(part.error);
           errorKind = kind;
+
+          // Hand a 413 to the no-tools fallback rather than to the user. That
+          // retry drops the tool definitions and replays only the real
+          // conversation, not the pending tool calls — measured at roughly
+          // 5,500 tokens smaller on the turn that first hit this, which is the
+          // difference between 8,210 and fitting inside the 8,000 limit.
+          //
+          // Nothing is written to the client here on purpose: the fallback
+          // usually answers, and an error line followed by a good answer reads
+          // as a bug. If the fallback also comes back empty, the
+          // EMPTY_REPLY_FALLBACK below still says something.
+          if (kind === "request_too_large" && !assistantText) {
+            oversized = true;
+            continue;
+          }
+
+          streamFailed = true;
           const retryAfter = kind === "rate_limit" ? extractRetryAfter(part.error) : undefined;
           res.write(
             JSON.stringify({ t: "error", v: MODEL_ERROR_MESSAGES[kind], kind, retryAfter }) + "\n",
@@ -348,12 +381,24 @@ export const chat = async (req, res, next) => {
         }
       }
 
-      // A turn that ran cleanly but produced no words at all. The user is
-      // looking at their own message and nothing else, so try once more.
-      if (!assistantText && !streamFailed && !res.writableEnded && !controller.signal.aborted) {
+      // Either a turn that ran cleanly but produced no words, or one that died
+      // on an oversized request. Both are rescued the same way: ask again with
+      // no tools, which is a much smaller request and cannot grow further.
+      //
+      // `oversized` is an explicit exception to the !streamFailed guard. That
+      // guard exists so a turn which already told the user it failed is not
+      // retried; a 413 never tells the user anything, precisely so this can run.
+      if (
+        !assistantText &&
+        (!streamFailed || oversized) &&
+        !res.writableEnded &&
+        !controller.signal.aborted
+      ) {
         console.warn(
-          "Empty reply, retrying without tools. finishReason:",
-          await result.finishReason.catch(() => "unknown"),
+          oversized
+            ? "Request too large, retrying without tools."
+            : "Empty reply, retrying without tools. finishReason:",
+          oversized ? "" : await result.finishReason.catch(() => "unknown"),
         );
 
         retried = true;
@@ -367,7 +412,12 @@ export const chat = async (req, res, next) => {
 
       // Retry said nothing either. Say *something*, so the turn is never silent.
       if (!assistantText && !streamFailed && !res.writableEnded && !controller.signal.aborted) {
-        assistantText = EMPTY_REPLY_FALLBACK;
+        // An oversized turn gets the message that names a way out. The generic
+        // line would leave the user retrying the identical too-large request,
+        // which is the one thing guaranteed not to work.
+        assistantText = oversized
+          ? MODEL_ERROR_MESSAGES.request_too_large
+          : EMPTY_REPLY_FALLBACK;
         res.write(JSON.stringify({ t: "text", v: assistantText }) + "\n");
       }
     } catch (streamErr) {
