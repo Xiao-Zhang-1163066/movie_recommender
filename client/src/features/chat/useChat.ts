@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import type { ChatMovie, Message, StreamEvent } from "./types";
+import type { ChatMovie, Message, StreamEvent, PendingWatch } from "./types";
 import {
   postChatMessage,
   getConversation,
   RateLimitError,
+  confirmWatched,
 } from "@/services/chatService";
 import { useNavigate } from "react-router-dom";
 
@@ -22,6 +23,20 @@ export function useChat(urlConversationId?: string) {
   const [streamingMovies, setStreamingMovies] = useState<ChatMovie[]>([]);
   // Which tool the agent is running right now, or null. Raw name, not copy.
   const [activeTool, setActiveTool] = useState<string | null>(null);
+  // Writes the agent has prepared and the user has not answered yet.
+  //
+  // Transient, like activeTool, and deliberately not committed into `messages`:
+  // the server never stores a proposal on the ChatMessage row, so a card living
+  // in the transcript would be something GET /chat/:id cannot reproduce, and a
+  // refresh would replay the conversation with a card silently missing from the
+  // middle of it. Losing it on refresh is the honest outcome, and it is safe
+  // because nothing was written — the user asks again and is back where they
+  // started.
+  //
+  // An array, not one slot. mark_watched takes a single tmdbId, so "I watched
+  // Dune and Inception" is two tool calls in one turn, and a single slot would
+  // silently drop the first card.
+  const [pendingWatches, setPendingWatches] = useState<PendingWatch[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [input, setInput] = useState("");
 
@@ -200,6 +215,15 @@ export function useChat(urlConversationId?: string) {
             setStreamingText(assistantText);
           } else if (event.t === "tool") {
             setActiveTool(event.v.name);
+          } else if (event.t === "confirm") {
+            // Appended rather than replaced, so a turn proposing two films
+            // shows two cards. Keyed on tmdbId below, so a model that proposes
+            // the same film twice cannot stack duplicates.
+            setPendingWatches((current) =>
+              current.some((p) => p.tmdbId === event.v.tmdbId)
+                ? current
+                : [...current, event.v],
+            );
           } else if (event.t === "movies") {
             assistantMovies = [...assistantMovies, ...event.v];
             setStreamingMovies(assistantMovies);
@@ -297,6 +321,38 @@ export function useChat(urlConversationId?: string) {
     }
   }
 
+  /**
+   * The user accepting a proposal. This is the only path to the database for a
+   * watched mark: the agent's tool cannot write, and this request carries no
+   * model output beyond the id it proposed.
+   *
+   * The card is removed on success only. A failed confirm leaves it on screen
+   * so the user can try again — dismissing it would lose the one thing that
+   * knows what they were trying to do.
+   */
+  async function confirmWatch(pending: PendingWatch) {
+    try {
+      const title = await confirmWatched(pending.tmdbId, pending.rating, pending.notes);
+      setPendingWatches((current) =>
+        current.filter((p) => p.tmdbId !== pending.tmdbId),
+      );
+      return { ok: true as const, title };
+    } catch (error) {
+      const message = (error as Error).message;
+      if (message === "SESSION_EXPIRED") {
+        // Matches how the rest of the hook treats an expired token rather than
+        // reporting it as a failed save, which would be misleading.
+        setErrorMessage("Your session has expired. Please sign in again.");
+      }
+      return { ok: false as const, message };
+    }
+  }
+
+  /** The user declining. Nothing was written, so there is nothing to undo. */
+  function dismissWatch(tmdbId: number) {
+    setPendingWatches((current) => current.filter((p) => p.tmdbId !== tmdbId));
+  }
+
   return {
     conversationId,
     isLoadingHistory,
@@ -304,6 +360,9 @@ export function useChat(urlConversationId?: string) {
     streamingText,
     streamingMovies,
     activeTool,
+    pendingWatches,
+    confirmWatch,
+    dismissWatch,
     isLoading,
     input,
     setInput,

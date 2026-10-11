@@ -94,6 +94,47 @@ export async function getConversation(conversationId: string): Promise<Conversat
   return data.data.conversation;
 }
 
+/**
+ * Accept a mark_watched proposal.
+ *
+ * The write the agent could not do. Note what is *not* sent: no title, no
+ * poster, no status. The server resolves the film from TMDB by id and always
+ * writes COMPLETED, so there is nothing here a caller could get wrong — and
+ * nothing the model could have influenced beyond the id it proposed.
+ *
+ * Returns the resolved title so the UI can name the film it recorded rather
+ * than just saying "saved", which is the user's last chance to spot the wrong
+ * one.
+ */
+export async function confirmWatched(
+  tmdbId: number,
+  rating: number | null,
+  notes: string | null,
+): Promise<string> {
+  const res = await fetch(`${API_BASE}/api/chat/confirm`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    // ?? undefined rather than passing null: the Zod schema marks these
+    // optional, and z.number().optional() rejects an explicit null.
+    body: JSON.stringify({
+      tmdbId,
+      rating: rating ?? undefined,
+      notes: notes ?? undefined,
+    }),
+  });
+
+  if (!res.ok) {
+    if (res.status === 401) throw new Error("SESSION_EXPIRED");
+    const data = await res.json().catch(() => ({}));
+    // A 422 carries a real reason ("TMDB has no release date..."), so read the
+    // body rather than showing a status-code-shaped fallback.
+    throw new Error(readErrorMessage(data, "Could not save that"));
+  }
+
+  const data = await res.json();
+  return data.data.watched.title as string;
+}
+
 /** The user's recent threads, newest first, for the sidebar. */
 export async function listConversations(): Promise<ConversationSummary[]> {
   const res = await fetch(`${API_BASE}/api/chat`, { headers: { ...getAuthHeaders() } });

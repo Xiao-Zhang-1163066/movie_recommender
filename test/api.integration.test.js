@@ -21,6 +21,7 @@ const prismaMock = {
     findMany: vi.fn(),
     findUnique: vi.fn(),
     create: vi.fn(),
+    upsert: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),
   },
@@ -29,6 +30,7 @@ const prismaMock = {
     findMany: vi.fn(),
     findUnique: vi.fn(),
     create: vi.fn(),
+    upsert: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),
   },
@@ -343,5 +345,123 @@ describe("admin routes", () => {
     // of an obvious zero.
     expect(res.body.data.errorRate).toBe(0);
     expect(res.body.data.retryRate).toBe(0);
+  });
+});
+
+describe("POST /api/chat/confirm", () => {
+  // The write half of mark_watched. The tool itself cannot write at all; this
+  // is the only path to the database, and it is reachable only by a signed-in
+  // user making their own request. These tests are about that boundary, not
+  // about the upsert, which chatTools.test.js covers.
+
+  const body = { tmdbId: 27205, rating: 9, notes: "Loved it" };
+
+  const post = (payload = body, auth = tokenFor(USER)) =>
+    request(app).post("/api/chat/confirm").set("Authorization", auth).send(payload);
+
+  it("rejects an unauthenticated request", async () => {
+    // If this ever passes without a token, the confirmation step is theatre:
+    // anything that can reach the route could write.
+    const res = await request(app).post("/api/chat/confirm").send(body);
+
+    expect(res.status).toBe(401);
+    expect(prismaMock.watchlistItem.upsert).not.toHaveBeenCalled();
+  });
+
+  it("writes against the token's user, not anything in the body", async () => {
+    // The body has no userId field, and this is what keeps it that way: a
+    // future "convenience" parameter would turn this route into a way to write
+    // to someone else's watchlist.
+    prismaMock.movie.findUnique.mockResolvedValue({ id: "m1", title: "Inception" });
+    prismaMock.watchlistItem.upsert.mockResolvedValue({});
+
+    const res = await post({ ...body, userId: OTHER_USER.id });
+
+    expect(res.status).toBe(200);
+    expect(prismaMock.watchlistItem.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { userId_movieId: { userId: USER.id, movieId: "m1" } },
+      }),
+    );
+  });
+
+  it("stores COMPLETED and echoes the resolved title", async () => {
+    prismaMock.movie.findUnique.mockResolvedValue({ id: "m1", title: "Inception" });
+    prismaMock.watchlistItem.upsert.mockResolvedValue({});
+
+    const res = await post();
+
+    expect(res.status).toBe(200);
+    expect(prismaMock.watchlistItem.upsert.mock.calls[0][0].update).toEqual({
+      status: "COMPLETED",
+      rating: 9,
+      notes: "Loved it",
+    });
+    // The title comes back so the UI names the film it recorded rather than
+    // just saying "saved" — the user's last chance to spot the wrong one.
+    expect(res.body.message).toContain("Inception");
+  });
+
+  it("ignores a title in the body, resolving it from TMDB instead", async () => {
+    // The schema has no title field, so one sent anyway is dropped rather than
+    // stored. A stored client-supplied title is how a confirmation card ends up
+    // describing a different film from the one it writes.
+    prismaMock.movie.findUnique.mockResolvedValue(null);
+    prismaMock.movie.upsert.mockResolvedValue({ id: "m1", title: "Inception" });
+    prismaMock.watchlistItem.upsert.mockResolvedValue({});
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          id: 27205,
+          title: "Inception",
+          release_date: "2010-07-15",
+          genres: [],
+        }),
+      }),
+    );
+
+    const res = await post({ ...body, title: "Totally Different Film" });
+
+    expect(res.status).toBe(200);
+    expect(prismaMock.movie.upsert.mock.calls[0][0].create.title).toBe("Inception");
+    vi.unstubAllGlobals();
+  });
+
+  it("rejects a malformed tmdbId before any database call", async () => {
+    for (const tmdbId of ["27205", -1, 27205.5, undefined]) {
+      const res = await post({ tmdbId });
+      expect(res.status, String(tmdbId)).toBe(400);
+    }
+    expect(prismaMock.watchlistItem.upsert).not.toHaveBeenCalled();
+  });
+
+  it("bounds the rating the same way the tool does", async () => {
+    expect((await post({ tmdbId: 27205, rating: 0 })).status).toBe(400);
+    expect((await post({ tmdbId: 27205, rating: 11 })).status).toBe(400);
+  });
+
+  it("answers 422, not 400, when TMDB has no release date for the film", async () => {
+    // The request was well-formed and the id was real; Movie.releaseYear is
+    // required and there is nothing to put in it. 400 would tell the client it
+    // sent something malformed, and it did not.
+    prismaMock.movie.findUnique.mockResolvedValue(null);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ id: 27205, title: "Unreleased", release_date: "", genres: [] }),
+      }),
+    );
+
+    const res = await post({ tmdbId: 27205 });
+
+    expect(res.status).toBe(422);
+    expect(res.body.message).toMatch(/release date/i);
+    expect(prismaMock.watchlistItem.upsert).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
   });
 });

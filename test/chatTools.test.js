@@ -15,6 +15,7 @@ const {
   getTasteProfile,
   markWatched,
   getShowtimes,
+  proposeWatched,
   findSimilarMovies,
   fetchWithRetry,
   TMDB_IMG_BASE,
@@ -564,5 +565,80 @@ describe("fetchWithRetry", () => {
     // as an upstream failure rather than an unknown one.
     const fetchFn = vi.fn().mockRejectedValue(new TypeError("fetch failed"));
     await expect(fetchWithRetry("u", { fetchFn, maxAttempts: 1 })).rejects.toThrow("fetch failed");
+  });
+});
+
+describe("proposeWatched — the title cross-check", () => {
+  // The model's title is never shown or stored; it is only compared with what
+  // TMDB says the id is. The case these tests are built around really
+  // happened: asked to mark Dune watched, the model wrote 438148 from memory,
+  // which is Minions: The Rise of Gru.
+
+  const tmdb = (body) => ({ fetchFn: okJson(body), cache: missingCache(), apiKey: "k" });
+  const MINIONS = { id: 438148, title: "Minions: The Rise of Gru", original_title: "Minions: The Rise of Gru" };
+
+  it("rejects an id that belongs to a different film", async () => {
+    const thrown = await proposeWatched(438148, "Dune", null, null, tmdb(MINIONS)).catch((e) => e);
+
+    expect(thrown.name).toBe("ToolFailure");
+    expect(thrown.kind).toBe("id_mismatch");
+  });
+
+  it("accepts the same title written differently", async () => {
+    // Case, punctuation and spacing are not evidence of a wrong id.
+    const body = { id: 693134, title: "Dune: Part Two", original_title: "Dune: Part Two" };
+
+    const result = await proposeWatched(693134, "dune part two", null, null, tmdb(body));
+
+    expect(result.title).toBe("Dune: Part Two");
+  });
+
+  it("accepts a film named by its original title", async () => {
+    const body = { id: 194, title: "Amélie", original_title: "Le Fabuleux Destin d'Amélie Poulain" };
+
+    const result = await proposeWatched(194, "Le fabuleux destin d'Amelie Poulain", null, null, tmdb(body));
+
+    expect(result.title).toBe("Amélie");
+  });
+
+  it("stays strict about a near miss, because a false accept is the costly error", async () => {
+    // "Part 2" vs "Part Two" is rejected. That costs the model one search; the
+    // opposite mistake puts the wrong film in front of the user.
+    const body = { id: 693134, title: "Dune: Part Two", original_title: "Dune: Part Two" };
+
+    const thrown = await proposeWatched(693134, "Dune Part 2", null, null, tmdb(body)).catch((e) => e);
+
+    expect(thrown.kind).toBe("id_mismatch");
+  });
+
+  it("rejects a bare franchise name against a sequel's id", async () => {
+    // The likeliest wrong-film mistake, and the reason matching is exact
+    // rather than "one contains the other": "duneparttwo" contains "dune", so a
+    // looser check would accept Dune's sequel when the user meant Dune.
+    const body = { id: 693134, title: "Dune: Part Two", original_title: "Dune: Part Two" };
+
+    const thrown = await proposeWatched(693134, "Dune", null, null, tmdb(body)).catch((e) => e);
+
+    expect(thrown.kind).toBe("id_mismatch");
+  });
+
+  it("never counts two empty titles as agreement", async () => {
+    // Normalising strips everything that is not a letter or digit, so a title
+    // made only of symbols becomes "" — and so does an empty claim. Without the
+    // guard those two would compare equal and pass.
+    const body = { id: 1, title: "?!", original_title: "?!" };
+
+    const thrown = await proposeWatched(1, "", null, null, tmdb(body)).catch((e) => e);
+
+    expect(thrown.kind).toBe("id_mismatch");
+  });
+
+  it("shows TMDB's title on the card, never the model's", async () => {
+    const body = { id: 27205, title: "Inception", original_title: "Inception" };
+
+    const result = await proposeWatched(27205, "INCEPTION!!", null, null, tmdb(body));
+
+    expect(result.title).toBe("Inception");
+    expect(JSON.stringify(result)).not.toContain("INCEPTION!!");
   });
 });

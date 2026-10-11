@@ -49,6 +49,13 @@ const MODEL_MESSAGES = {
     "Searching by description is unavailable right now. Do not call it again this turn. " +
     "Use search_movies if the user named a particular film, otherwise recommend from the " +
     "now-showing list in your instructions.",
+  // Thrown by proposeWatched, not classified from an error: the id resolved to
+  // a real film, just not the one the model named. Like not_found it invites a
+  // retry, because the fix is one search away. It must not claim the service
+  // failed — nothing failed except the model's recall.
+  id_mismatch:
+    "That TMDB id belongs to a different film from the title you gave, so the id is wrong. " +
+    "Do not guess ids from memory. Look the title up with search_movies and use the id it returns.",
   unknown: `That step failed for an unexpected reason. ${DO_NOT_RETRY}`,
 };
 

@@ -17,4 +17,26 @@ const chatMessageSchema = z.object({
     .max(2000, "Message must be 2000 characters or fewer"),
 });
 
-export { chatMessageSchema };
+// POST /api/chat/confirm — the user accepting a mark_watched proposal.
+//
+// Only the id and the two optional fields. No title, no poster, no overview:
+// the server resolves those from TMDB itself, so there is nothing here a
+// caller could get wrong or a future TMDB correction could leave stale. It also
+// keeps this schema honest — every field present is a field the user chose.
+//
+// status is absent on purpose rather than optional. This endpoint means one
+// thing, "I watched it", and an endpoint that takes a status would be a second
+// way to do what PUT /api/watchlist/:id already does.
+const confirmWatchedSchema = z.object({
+  // int(), not just number(): TMDB ids are integers, and 27205.5 reaching the
+  // database as a Float that silently fails the lookup is a worse outcome than
+  // a 400 here.
+  tmdbId: z.number().int().positive("tmdbId must be a positive integer"),
+  rating: z.number().int().min(1).max(10).optional(),
+  // Matches ChatMessage-sized free text rather than being unbounded; notes ride
+  // into get_taste_profile and get_user_watchlist results, so they are model
+  // context and therefore billed.
+  notes: z.string().trim().max(500, "Notes must be 500 characters or fewer").optional(),
+});
+
+export { chatMessageSchema, confirmWatchedSchema };

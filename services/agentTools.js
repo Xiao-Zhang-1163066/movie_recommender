@@ -3,7 +3,7 @@ import { z } from "zod";
 import {
   getUserWatchlist,
   getTasteProfile,
-  markWatched,
+  proposeWatched,
   searchMovies,
   getMovieDetails,
   getShowtimes,
@@ -42,7 +42,27 @@ import { toToolFailure } from "./toolErrors.js";
  * system prompt instead, so the model does not spend a tool-call round-trip on
  * something needed every turn.
  */
+/**
+ * Tools whose result is a proposal awaiting the user, not an accomplished fact.
+ *
+ * Named here rather than sniffed for a `pending` key in the controller, so the
+ * list of tools that need a confirmation card is one grep away and adding a
+ * second write tool is one line. The controller already branches on tool name
+ * for recommend_movies, so this matches how it reads the stream.
+ */
+export const CONFIRMABLE_TOOLS = new Set(["mark_watched"]);
+
 export function buildTools(userId, deps = {}) {
+  // Every optional argument is .nullish(), never .optional(). The two differ in
+  // what the model may *send*: optional means the key may be absent, but if
+  // present it must match the type — and gpt-oss fills a blank by writing
+  // `rating: null` rather than leaving the key out. Groq validates arguments
+  // against this schema on its own servers before execute ever runs, so a null
+  // where the schema says number rejects the whole generation and ends the
+  // turn. Phase 1's containment cannot see it: it wraps execute, and execute is
+  // never reached. Found on 2026-10-12 by asking to mark two films watched with
+  // no rating. Every implementation already treats null like undefined
+  // (`?? null`, `?? false`, `if (date)`), so accepting it costs nothing.
   const tools = {
     get_user_watchlist: tool({
       description:
@@ -50,7 +70,7 @@ export function buildTools(userId, deps = {}) {
       inputSchema: z.object({
         status: z
           .enum(["PLANNED", "WATCHING", "COMPLETED", "DROPPED"])
-          .optional(),
+          .nullish(),
       }),
       execute: async ({ status }) => getUserWatchlist(userId, status, deps),
     }),
@@ -62,22 +82,38 @@ export function buildTools(userId, deps = {}) {
       execute: async () => getTasteProfile(userId, deps),
     }),
 
-    // tmdbId, not movieId. This asked for an internal Movie.id uuid, which no
-    // tool has ever put in front of the model — so it had to invent one and the
-    // write failed on the foreign key every time. The id is resolved to a row
-    // inside markWatched now, and the film is created from TMDB if we have
-    // never seen it.
+    // The one write-class tool, and it no longer writes. proposeWatched is
+    // read-only: it resolves the title and hands back a proposal, and the write
+    // happens on POST /api/chat/confirm after the user accepts the card.
+    //
+    // The description says "prepare", not "mark", on purpose. A model told it
+    // can mark a film watched will report that it did; the wording is as much
+    // of this tool's behaviour as the schema is.
+    //
+    // tmdbId, not movieId: this asked for an internal Movie.id uuid, which no
+    // tool has ever put in front of the model, so it had to invent one and the
+    // write failed on the foreign key every time.
     mark_watched: tool({
       description:
-        "Mark a movie as watched for the logged-in user, optionally with a rating (1-10) and notes. " +
-        "Pass the film's TMDB id, the same id search_movies and the now-showing list return.",
+        "Prepare to mark a movie as watched for the logged-in user, optionally with a rating (1-10) " +
+        "and notes. Pass the film's TMDB id, the same id search_movies and the now-showing list " +
+        "return. This does NOT save anything — it shows the user a confirmation card, and they " +
+        "decide. Ask them to confirm; never tell them it is already done.",
       inputSchema: z.object({
         tmdbId: z.number(),
-        rating: z.number().min(1).max(10).optional(),
-        notes: z.string().optional(),
+        // Required, not nullish: the check only works if the model commits to
+        // a name. It is compared against TMDB's title for the id and then
+        // discarded — never shown on the card, never stored.
+        title: z
+          .string()
+          .describe(
+            "The film's title as you understand it. Used only to check the id is the right film.",
+          ),
+        rating: z.number().min(1).max(10).nullish(),
+        notes: z.string().nullish(),
       }),
-      execute: async ({ tmdbId, rating, notes }) =>
-        markWatched(userId, tmdbId, rating, notes, deps),
+      execute: async ({ tmdbId, title, rating, notes }) =>
+        proposeWatched(tmdbId, title, rating, notes, deps),
     }),
 
     // "when the user names a film" is the half that matters now that a second
@@ -112,7 +148,7 @@ export function buildTools(userId, deps = {}) {
         "listings at all, which is different from being listed with no upcoming sessions.",
       inputSchema: z.object({
         tmdbId: z.number(),
-        date: z.string().optional(),
+        date: z.string().nullish(),
       }),
       execute: async ({ tmdbId, date }) => getShowtimes(tmdbId, date, deps),
     }),
@@ -149,18 +185,16 @@ export function buildTools(userId, deps = {}) {
         "Use this whenever the user describes the kind of film they want instead of naming one. " +
         "Searches the local Christchurch catalogue, not all of TMDB.",
       inputSchema: z.object({
-        description: z
-          .string()
-          .describe(
-            // Measured, not guessed: plot-style wording scored 0.73 against the
-            // right film, while category wording ("a loud action blockbuster")
-            // barely cleared the noise floor. Overviews are written as plots, so
-            // queries shaped like plots match them.
-            "A short plot-style description of the film the user is imagining, in the style of a synopsis — not genre labels",
-          ),
+        description: z.string().describe(
+          // Measured, not guessed: plot-style wording scored 0.73 against the
+          // right film, while category wording ("a loud action blockbuster")
+          // barely cleared the noise floor. Overviews are written as plots, so
+          // queries shaped like plots match them.
+          "A short plot-style description of the film the user is imagining, in the style of a synopsis — not genre labels",
+        ),
         onlyInTheatres: z
           .boolean()
-          .optional()
+          .nullish()
           .describe(
             "True when the user wants something they can watch in a cinema now",
           ),

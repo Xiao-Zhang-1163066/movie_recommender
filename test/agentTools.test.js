@@ -10,6 +10,7 @@ vi.mock("../config/redis.js", () => ({
 }));
 
 const { buildTools } = await import("../services/agentTools.js");
+const { zodSchema } = await import("ai");
 
 // These tests cover the layer the model reads — names, schemas, and the wiring
 // from each definition to its implementation. What the implementations do is
@@ -80,11 +81,18 @@ describe("buildTools — input schemas", () => {
   });
 
   it("mark_watched takes a numeric tmdbId and bounds the rating to 1–10", () => {
-    expect(accepts("mark_watched", { tmdbId: 27205, rating: 8 })).toBe(true);
-    expect(accepts("mark_watched", { tmdbId: 27205 })).toBe(true);
-    expect(accepts("mark_watched", { rating: 8 })).toBe(false);
-    expect(accepts("mark_watched", { tmdbId: 27205, rating: 0 })).toBe(false);
-    expect(accepts("mark_watched", { tmdbId: 27205, rating: 11 })).toBe(false);
+    const film = { tmdbId: 27205, title: "Inception" };
+    expect(accepts("mark_watched", { ...film, rating: 8 })).toBe(true);
+    expect(accepts("mark_watched", film)).toBe(true);
+    expect(accepts("mark_watched", { title: "Inception", rating: 8 })).toBe(false);
+    expect(accepts("mark_watched", { ...film, rating: 0 })).toBe(false);
+    expect(accepts("mark_watched", { ...film, rating: 11 })).toBe(false);
+  });
+
+  it("mark_watched requires a title, because the id check needs one", () => {
+    // Optional would let the model skip the one claim that exposes an
+    // invented id.
+    expect(accepts("mark_watched", { tmdbId: 27205 })).toBe(false);
   });
 
   it("mark_watched rejects the internal uuid it used to ask for", () => {
@@ -167,26 +175,66 @@ describe("buildTools — wiring to implementations", () => {
     expect(prisma.watchlistItem.findMany.mock.calls[0][0].where.userId).toBe("u1");
   });
 
-  it("passes every mark_watched argument through, with the user's id", async () => {
+  it("gives mark_watched no way to write at all", async () => {
+    // The trust boundary, as an absence rather than a check. If this ever
+    // fails, the model can write to the database on its own say-so again —
+    // which is the whole thing Phase 3 removed. Asserting on the Prisma double
+    // rather than on the return value is deliberate: a return value can be
+    // made to look right while a write still happens underneath.
     const prisma = {
-      movie: { findUnique: vi.fn().mockResolvedValue({ id: "m1", title: "Inception" }) },
-      watchlistItem: { upsert: vi.fn().mockResolvedValue({}) },
+      movie: { findUnique: vi.fn(), upsert: vi.fn(), create: vi.fn() },
+      watchlistItem: { upsert: vi.fn(), create: vi.fn(), update: vi.fn() },
     };
-    await buildTools("u1", { prisma }).mark_watched.execute({
+
+    await buildTools("u1", {
+      prisma,
+      fetchFn: okJson({ id: 27205, title: "Inception", poster_path: "/p.jpg" }),
+      cache: missingCache(),
+      apiKey: "k",
+    }).mark_watched.execute(
+      { tmdbId: 27205, title: "Inception", rating: 9, notes: "Loved it" },
+      {},
+    );
+
+    for (const model of Object.values(prisma)) {
+      for (const [name, spy] of Object.entries(model)) {
+        expect(spy, name).not.toHaveBeenCalled();
+      }
+    }
+  });
+
+  it("returns a proposal carrying the arguments and a TMDB-sourced title", async () => {
+    const result = await buildTools("u1", {
+      fetchFn: okJson({ id: 27205, title: "Inception", poster_path: "/p.jpg" }),
+      cache: missingCache(),
+      apiKey: "k",
+    }).mark_watched.execute(
+      { tmdbId: 27205, title: "Inception", rating: 9, notes: "Loved it" },
+      {},
+    );
+
+    expect(result).toMatchObject({
+      pending: true,
       tmdbId: 27205,
+      // From TMDB, never from the model: an invented title would make the
+      // confirmation card lie about what the user is approving.
+      title: "Inception",
       rating: 9,
       notes: "Loved it",
     });
+  });
 
-    // The TMDB id is looked up; the uuid written to WatchlistItem comes from
-    // that lookup and never from the model.
-    expect(prisma.movie.findUnique).toHaveBeenCalledWith({ where: { tmdbId: 27205 } });
-    expect(prisma.watchlistItem.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { userId_movieId: { userId: "u1", movieId: "m1" } },
-        create: expect.objectContaining({ userId: "u1", movieId: "m1", rating: 9, notes: "Loved it" }),
-      }),
-    );
+  it("tells the model to ask, not to announce", async () => {
+    // Without this the model reports "done" off the back of pending: true, and
+    // the transcript records a write that may never happen.
+    const result = await buildTools("u1", {
+      fetchFn: okJson({ id: 27205, title: "Inception" }),
+      cache: missingCache(),
+      apiKey: "k",
+    }).mark_watched.execute({ tmdbId: 27205, title: "Inception" }, {});
+
+    expect(result.instruction).toMatch(/confirm/i);
+    expect(result.instruction).toMatch(/not been saved|do not say it is done/i);
   });
 
   it("forwards network deps to search_movies, so a test never reaches TMDB", async () => {
@@ -296,7 +344,7 @@ describe("buildTools — error containment", () => {
     const inputs = {
       get_user_watchlist: {},
       get_taste_profile: {},
-      mark_watched: { tmdbId: 27205 },
+      mark_watched: { tmdbId: 27205, title: "Inception" },
       search_movies: { query: "dune" },
       get_movie_details: { movieId: "603" },
       get_showtimes: { tmdbId: 27205 },
@@ -365,5 +413,51 @@ describe("buildTools — error containment", () => {
 
     expect(result).toBeInstanceOf(Error);
     expect(result.kind).toBe("upstream");
+  });
+});
+
+describe("buildTools — what the provider accepts", () => {
+  // Groq validates the model's arguments against these schemas on its own
+  // servers, before execute runs. A mismatch there does not become a
+  // tool-error the model can recover from — it rejects the whole generation
+  // and ends the turn, out of reach of the containment above.
+
+  it("lets every optional argument be null, not just absent", () => {
+    // The bug this pins: `rating: z.number().optional()` meant "may be absent,
+    // but if present must be a number", and gpt-oss fills a blank with
+    // `rating: null`. Asking to mark two films watched with no rating killed
+    // the turn with "expected number, but got null".
+    //
+    // Checked on the JSON schema actually sent to the provider, and swept over
+    // every tool, so a tool added later with a plain .optional() fails here
+    // without anyone having to remember this happened.
+    for (const [name, definition] of Object.entries(buildTools("u1"))) {
+      const { properties = {}, required = [] } = zodSchema(definition.inputSchema).jsonSchema;
+      for (const [field, schema] of Object.entries(properties)) {
+        if (required.includes(field)) continue;
+        const allowsNull = (schema.anyOf ?? [schema]).some(
+          (option) => option.type === "null" || [].concat(option.type).includes("null"),
+        );
+        expect(allowsNull, `${name}.${field}`).toBe(true);
+      }
+    }
+  });
+
+  it("treats a null status as no filter, not as a filter on null", async () => {
+    const prisma = { watchlistItem: { findMany: vi.fn().mockResolvedValue([]) } };
+    await buildTools("u1", { prisma }).get_user_watchlist.execute({ status: null }, {});
+
+    expect(prisma.watchlistItem.findMany.mock.calls[0][0].where).toEqual({ userId: "u1" });
+  });
+
+  it("treats a null theatre filter as false", async () => {
+    const prisma = { $queryRaw: vi.fn().mockResolvedValue([]) };
+    await buildTools("u1", {
+      prisma,
+      embedQuery: vi.fn().mockResolvedValue([0.1]),
+    }).find_similar_movies.execute({ description: "x", onlyInTheatres: null }, {});
+
+    // Bound values of the tagged template: the vector twice, then the flag.
+    expect(prisma.$queryRaw.mock.calls[0].slice(1)).toContain(false);
   });
 });

@@ -12,6 +12,26 @@ export type ChatMovie = {
   inTheatre: boolean;
 };
 
+// A write the agent has prepared but not performed. mark_watched is read-only:
+// it resolves the title and hands this back, and nothing reaches the database
+// until the user accepts it on a card, which POSTs to /api/chat/confirm.
+//
+// `title` and `posterUrl` are resolved server-side from TMDB, never supplied by
+// the model. An invented title would make this card describe one film while the
+// tmdbId wrote another — the card lying about what is being approved, which
+// would defeat the only safeguard in the flow.
+export type PendingWatch = {
+  pending: true;
+  tmdbId: number;
+  title: string;
+  posterUrl: string | null;
+  rating: number | null;
+  notes: string | null;
+  // Present on the wire but meant for the model, not for rendering: it tells it
+  // to ask rather than announce. Typed so nobody reads it as UI copy.
+  instruction?: string;
+};
+
 export type Message = {
   // Set on messages loaded from the server. Optimistic messages the user has
   // only just typed have no id until the next load, which is why it is optional.
@@ -32,4 +52,24 @@ export type StreamEvent =
   // change without a backend deploy.
   | { t: "tool"; v: { name: string } }
   | { t: "movies"; v: ChatMovie[] }
-  | { t: "error"; v: string; kind?: "rate_limit" | "daily_limit" | "context_limit" | "general"; retryAfter?: number };
+  // A proposal awaiting the user. Transient like `tool`, not committed into
+  // `messages`: the server does not store it on the ChatMessage row, so a card
+  // sitting in the transcript would be something GET /chat/:id cannot reproduce
+  // — the stored history would replay missing a card that was once there.
+  // Losing it on refresh is safe precisely because nothing was written.
+  | { t: "confirm"; v: PendingWatch }
+  // request_too_large was added by b5b3d87 and never reached this union, so a
+  // 413 fell into the `else` branch and was shown as a generic warning. It is
+  // the one kind with a specific way out ("start a new chat"), which is exactly
+  // what the generic path throws away.
+  | {
+      t: "error";
+      v: string;
+      kind?:
+        | "rate_limit"
+        | "daily_limit"
+        | "context_limit"
+        | "request_too_large"
+        | "general";
+      retryAfter?: number;
+    };

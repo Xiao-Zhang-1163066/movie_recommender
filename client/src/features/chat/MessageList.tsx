@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
-import type { ChatMovie, Message } from "./types";
+import type { ChatMovie, Message, PendingWatch } from "./types";
 import ChatMovieCard from "./ChatMovieCard";
+import ConfirmWatchCard from "./ConfirmWatchCard";
 import MovieDetailModal from "./MovieDetailModal";
 import { DotStream } from "ldrs/react";
 import "ldrs/react/DotStream.css";
@@ -83,6 +84,9 @@ function MessageList({
   streamingText,
   streamingMovies,
   activeTool,
+  pendingWatches,
+  onConfirmWatch,
+  onDismissWatch,
   isLoading,
   onExampleClick,
 }: {
@@ -90,6 +94,11 @@ function MessageList({
   streamingText: string;
   streamingMovies: ChatMovie[];
   activeTool: string | null;
+  pendingWatches: PendingWatch[];
+  onConfirmWatch: (
+    pending: PendingWatch,
+  ) => Promise<{ ok: true; title: string } | { ok: false; message: string }>;
+  onDismissWatch: (tmdbId: number) => void;
   isLoading: boolean;
   onExampleClick: (q: string) => void;
 }) {
@@ -101,9 +110,12 @@ function MessageList({
   // Scroll to bottom when a message is added or loading state changes.
   // Intentionally excludes streamingText — firing on every delta would queue
   // dozens of scroll animations and make the response feel jittery.
+  // pendingWatches.length only moves the scroll *earlier*: a card arriving
+  // mid-stream is brought into view at once rather than when isLoading flips
+  // false at the end of the turn, which would reveal it anyway.
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length, isLoading]);
+  }, [messages.length, isLoading, pendingWatches.length]);
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto px-10 py-8">
@@ -228,6 +240,19 @@ function MessageList({
             )}
           </div>
         )}
+
+        {/* Outside the streamingText block on purpose. That block unmounts when
+            the turn ends and its text is committed to `messages`, which would
+            take the card with it — and the card has to outlive the stream,
+            because answering it is a decision the user makes afterwards. */}
+        {pendingWatches.map((pending) => (
+          <ConfirmWatchCard
+            key={pending.tmdbId}
+            pending={pending}
+            onConfirm={() => onConfirmWatch(pending)}
+            onDismiss={() => onDismissWatch(pending.tmdbId)}
+          />
+        ))}
       </div>
 
       {/* Scroll anchor — sits below all content so scrollIntoView lands at the bottom */}

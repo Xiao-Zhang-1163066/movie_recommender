@@ -1,8 +1,8 @@
 import { streamText, stepCountIs } from "ai";
 // import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createGroq } from "@ai-sdk/groq";
-import { getNowShowing } from "./chatTools.js";
-import { buildTools } from "../services/agentTools.js";
+import { getNowShowing, markWatched } from "./chatTools.js";
+import { buildTools, CONFIRMABLE_TOOLS } from "../services/agentTools.js";
 import { recordAgentRun } from "../services/agentRunService.js";
 import { hasEmbeddingSupport } from "../services/embeddingService.js";
 import {
@@ -239,6 +239,7 @@ const MODEL_ERROR_MESSAGES = {
  *                                                      chat learns its own id
  *   { "t": "text",   "v": "<delta>" }                 incremental assistant text
  *   { "t": "movies", "v": [ ...cards ] }              a recommend_movies result
+ *   { "t": "confirm", "v": { ...proposal } }          a write awaiting the user
  *   { "t": "error",  "v": "<message>", "kind": "..." } a stream-level error
  */
 export const chat = async (req, res, next) => {
@@ -363,6 +364,22 @@ export const chat = async (req, res, next) => {
           } else {
             console.error("recommend_movies returned a non-array:", part.output);
           }
+        } else if (
+          part.type === "tool-result" &&
+          CONFIRMABLE_TOOLS.has(part.toolName)
+        ) {
+          // A proposal, not a result. The tool wrote nothing; this line is what
+          // puts the decision in front of the user, and the write happens on
+          // POST /chat/confirm if they accept.
+          //
+          // Deliberately not appended to assistantText or assistantMovies, and
+          // so not stored on the ChatMessage row. A refresh before confirming
+          // therefore loses the card — a real limitation, accepted because
+          // persisting it needs a schema change and a half-answered proposal
+          // reloaded hours later is its own problem. The user re-asks; nothing
+          // was written either way, which is the property that makes losing it
+          // safe rather than merely tolerable.
+          res.write(JSON.stringify({ t: "confirm", v: part.output }) + "\n");
         } else if (part.type === "tool-error") {
           // Not a failed turn. The SDK hands the error text back to the model
           // as that call's result and the step loop continues, so the right
@@ -530,6 +547,58 @@ export const chat = async (req, res, next) => {
         console.error("Failed to record agent run:", logErr);
       });
     }
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * POST /chat/confirm
+ * Body: { tmdbId: number, rating?: number, notes?: string }
+ *
+ * The other half of mark_watched. The tool shows a card and writes nothing;
+ * this is where the write happens, once the user has accepted it.
+ *
+ * The important property is who is calling. This is an ordinary authenticated
+ * request from the user's browser, with no model in the call chain at all — so
+ * a tool result the model produced cannot reach the database without a separate
+ * human action. That is the trust boundary, and it is the reason the write is a
+ * route rather than something resumed inside the agent loop.
+ *
+ * It needs no token proving "the model proposed this", which is worth saying
+ * because it looks like an omission. The user is already signed in and can POST
+ * to /api/watchlist for their own data whenever they like, so such a token
+ * would guard nothing. What is being removed here is the model's autonomy, not
+ * the user's permission.
+ *
+ * chatLimiter is deliberately not applied. That quota exists to bound model
+ * calls, and spending it on the cheap half of the interaction would mean a user
+ * who confirms a lot runs out of conversation. This does hit TMDB on a film we
+ * have never seen, but behind the same 24 h cache every other tool shares.
+ */
+export const confirmWatched = async (req, res, next) => {
+  try {
+    const { tmdbId, rating, notes } = req.body;
+
+    // The same function the tool used to call, unchanged and already covered by
+    // tests. Phase 2 made it work; Phase 3 only moved who is allowed to call it.
+    const result = await markWatched(req.user.id, tmdbId, rating, notes);
+
+    // 422 rather than 400: the request was well-formed and the id was real, but
+    // TMDB holds no release date and Movie.releaseYear is required, so there is
+    // nothing to store. 400 would tell the client it sent something malformed,
+    // and it did not.
+    if (!result.success) {
+      return res.status(422).json({ status: "fail", message: result.reason });
+    }
+
+    res.status(200).json({
+      status: "success",
+      data: { watched: { tmdbId, title: result.title, rating: rating ?? null } },
+      // Echoes the resolved title, so the UI confirms which film was recorded
+      // rather than just saying "saved" — the same reason markWatched returns it.
+      message: `Marked ${result.title} as watched`,
+    });
   } catch (err) {
     next(err);
   }

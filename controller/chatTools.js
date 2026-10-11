@@ -1,6 +1,7 @@
 import { prisma as defaultPrisma } from "../config/db.js";
 import { cache as defaultCache } from "../config/redis.js";
 import { embedQuery as defaultEmbedQuery, toSqlVector } from "../services/embeddingService.js";
+import { ToolFailure } from "../services/toolErrors.js";
 
 export const TMDB_IMG_BASE = "https://image.tmdb.org/t/p/w500";
 
@@ -166,6 +167,107 @@ async function findOrCreateMovieByTmdbId(
       createdBy: userId,
     },
   });
+}
+
+/**
+ * The read-only half of mark_watched: describe the write without performing it.
+ *
+ * This is the whole trust boundary, and it is deliberately an *absence* rather
+ * than a check. The tool the model can reach has no code path that writes —
+ * not a permission test it might be argued past, but no capability at all. The
+ * real write lives behind POST /api/chat/confirm, which only a signed-in user
+ * can call.
+ *
+ * Worth being precise about what that buys, because it is easy to oversell as
+ * "prompt-injection defence". The user is already authenticated and can POST to
+ * /api/watchlist for their own data whenever they like, so this grants nobody
+ * anything they did not have. What it removes is the model's ability to write
+ * *autonomously*. The failure it actually prevents is the common one: the model
+ * hearing "I want to watch Dune" as "I watched Dune". Injection is one source of
+ * a wrong write, and not the likeliest.
+ *
+ * There is a real injection surface, though, and it is not the user's own
+ * message: search_movies returns TMDB `overview` text, TMDB is publicly
+ * editable, and that text goes into the context verbatim. A synopsis can carry
+ * instructions. That is third-party content, which is exactly the case a
+ * confirmation step is for.
+ *
+ * The title comes from TMDB, never from the model. A `title` parameter would be
+ * a field it could invent, and an invented title means the confirmation card
+ * reads "Mark The Godfather as watched?" over Inception's id — the card lying
+ * to the user about what they are approving, which would defeat the only
+ * safeguard here. Same rule as findOrCreateMovieByTmdbId: the model passes a
+ * number, we fetch the rest. The shared cache key makes it free for any film
+ * already looked at this turn.
+ *
+ * Nothing is created here. A proposal the user may well decline must not leave
+ * a Movie row behind; findOrCreateMovieByTmdbId does that on confirmation.
+ */
+// Case, accents, punctuation and spacing removed, so "Dune: Part Two" and
+// "dune part two" compare equal. \p{L}\p{N} rather than [a-z0-9] so a title
+// in another script survives instead of normalising to an empty string, which
+// would match every other empty string.
+function normaliseTitle(title) {
+  return String(title ?? "")
+    .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]/gu, "");
+}
+
+export async function proposeWatched(
+  tmdbId,
+  claimedTitle,
+  rating,
+  notes,
+  {
+    fetchFn = fetch,
+    cache = defaultCache,
+    apiKey = process.env.TMDB_API_KEY,
+  } = {},
+) {
+  const data = await fetchTmdbCached(
+    `https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${apiKey}`,
+    `tmdb:movie:${tmdbId}`,
+    86_400, // 24 h
+    { fetchFn, cache },
+  );
+
+  // The cross-check. The model's title is never shown or stored — it is
+  // untrusted, so it is evidence, not data. But a hallucinated id almost never
+  // lands on a film with the same name, so two claims that disagree mean one
+  // was invented. Found in testing: the model wrote 438148 for Dune, which is
+  // Minions: The Rise of Gru.
+  //
+  // Exact after normalising, deliberately strict. A false rejection ("Dune
+  // Part 2" vs "Dune: Part Two") costs one search_movies call and heals
+  // itself; a false acceptance puts the wrong film in front of the user, which
+  // is the thing this exists to stop. A looser "one contains the other" check
+  // would accept Dune: Part Two's id for "Dune" — sequels are exactly where
+  // the model confuses ids. original_title too, because a user may
+  // name a film the way it was released.
+  const claimed = normaliseTitle(claimedTitle);
+  const matches = [data.title, data.original_title].some(
+    (title) => title && normaliseTitle(title) === claimed,
+  );
+  if (!claimed || !matches) throw new ToolFailure("id_mismatch");
+
+  return {
+    pending: true,
+    tmdbId,
+    title: data.title,
+    // The card is a yes/no decision about one film, so it earns a poster — and
+    // a poster is the fastest way for a user to notice it is the wrong film.
+    posterUrl: data.poster_path ? `${TMDB_IMG_BASE}${data.poster_path}` : null,
+    rating: rating ?? null,
+    notes: notes ?? null,
+    // Written for the model, not the UI, and the reason this field exists:
+    // given { pending: true } alone the model reports "done" and the transcript
+    // records a write that may never happen. Phase 1's lesson again — a tool's
+    // return value is an instruction the model reads, not just data.
+    instruction:
+      "Nothing has been saved yet. Tell the user you have prepared this and ask them to confirm it on the card. Do not say it is done, and do not call this tool again for the same film.",
+  };
 }
 
 export async function markWatched(

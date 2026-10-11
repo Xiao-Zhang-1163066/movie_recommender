@@ -20,6 +20,9 @@ function ChatPage() {
     streamingText,
     streamingMovies,
     activeTool,
+    pendingWatches,
+    confirmWatch,
+    dismissWatch,
     isLoading,
     input,
     setInput,
@@ -58,6 +61,9 @@ function ChatPage() {
               streamingText={streamingText}
               streamingMovies={streamingMovies}
               activeTool={activeTool}
+              pendingWatches={pendingWatches}
+              onConfirmWatch={confirmWatch}
+              onDismissWatch={dismissWatch}
               isLoading={isLoading}
               onExampleClick={sendMessage}
             />

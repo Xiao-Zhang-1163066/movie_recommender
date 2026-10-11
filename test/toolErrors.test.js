@@ -73,10 +73,19 @@ describe("classifyToolError", () => {
 });
 
 describe("ToolFailure — the message the model reads", () => {
-  const kinds = ["timeout", "upstream", "database", "embedding", "not_found", "unknown"];
-  // not_found is the exception: it is the only kind where another call is the
-  // right move, because the id was wrong rather than the dependency broken.
-  const noRetryKinds = kinds.filter((kind) => kind !== "not_found");
+  const kinds = [
+    "timeout",
+    "upstream",
+    "database",
+    "embedding",
+    "not_found",
+    "id_mismatch",
+    "unknown",
+  ];
+  // The exceptions: kinds where another call is the right move, because the id
+  // was wrong rather than a dependency broken.
+  const retryKinds = ["not_found", "id_mismatch"];
+  const noRetryKinds = kinds.filter((kind) => !retryKinds.includes(kind));
 
   it("gives every kind a message", () => {
     for (const kind of kinds) {
@@ -122,6 +131,15 @@ describe("ToolFailure — the message the model reads", () => {
     expect(message).toContain("search_movies");
     // Must not claim the service is broken — that was the whole bug.
     expect(message).not.toMatch(/unavailable|did not respond/i);
+  });
+
+  it("sends the model to search when its id names a different film", () => {
+    const message = new ToolFailure("id_mismatch").message;
+    expect(message).toContain("search_movies");
+    expect(message).toMatch(/do not guess ids/i);
+    // Nothing failed except the model's recall; claiming an outage would be
+    // false and would stop it from fixing the id.
+    expect(message).not.toMatch(/unavailable|did not respond|could not be reached/i);
   });
 
   it("points the embedding failure at the tool that still works", () => {
