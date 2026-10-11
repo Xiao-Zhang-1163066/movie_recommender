@@ -316,11 +316,28 @@ export async function getShowtimes(tmdbId, date, { prisma = defaultPrisma } = {}
     const endDate = new Date(startDate);
     endDate.setDate(endDate.getDate() + 1);
     where.startsAt = { gte: startDate, lt: endDate };
+  } else {
+    // Upcoming only. Without this the answer was every session ever scraped:
+    // scraper/db.py deletes only *future* sessions before re-inserting, because
+    // the cinema website is authoritative about the future and silent about the
+    // past, so past rows accumulate indefinitely. The model read them as
+    // current and offered users screenings that had already happened.
+    //
+    // A date is still honoured as given. Someone asking what played on a
+    // particular Saturday deserves a straight answer, even a past one — the
+    // default is what needed fixing, not the filter.
+    //
+    // getNowShowing, findSimilarMovies and recommendMovies all filtered on
+    // startsAt already. This was the one that did not.
+    where.startsAt = { gt: new Date() };
   }
 
   const sessions = await prisma.session.findMany({
     where,
     include: { cinema: true },
+    // Chronological, because the model is answering "when can I see this" and
+    // an unordered list makes it pick a time rather than the earliest one.
+    orderBy: { startsAt: "asc" },
   });
   return { found: true, title: movie.title, sessions };
 }

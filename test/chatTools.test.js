@@ -375,8 +375,45 @@ describe("getShowtimes tool", () => {
       select: { id: true, title: true },
     });
     // The uuid from the lookup, never the number the model passed.
-    expect(prisma.session.findMany.mock.calls[0][0].where).toEqual({ movieId: "movie-456" });
+    expect(prisma.session.findMany.mock.calls[0][0].where.movieId).toBe("movie-456");
     expect(result).toEqual({ found: true, title: "Inception", sessions });
+  });
+
+  it("returns only upcoming sessions when no date is given", async () => {
+    // scraper/db.py deletes only *future* sessions before re-inserting, so past
+    // rows accumulate forever. Without this filter the answer was every session
+    // ever scraped, and the model offered users screenings that had already
+    // happened — a confident wrong answer, the most expensive kind.
+    const prisma = fakePrisma({ movie: { id: "m1", title: "Inception" } });
+    const before = Date.now();
+
+    await getShowtimes(27205, undefined, { prisma });
+
+    const { startsAt } = prisma.session.findMany.mock.calls[0][0].where;
+    expect(startsAt.gt.getTime()).toBeGreaterThanOrEqual(before);
+  });
+
+  it("still honours a date that is in the past", async () => {
+    // The default was the bug, not the filter. Someone asking what played on a
+    // particular Saturday deserves a straight answer.
+    const prisma = fakePrisma({ movie: { id: "m1", title: "Inception" } });
+
+    await getShowtimes(27205, "2020-01-01", { prisma });
+
+    const { startsAt } = prisma.session.findMany.mock.calls[0][0].where;
+    expect(startsAt.gte).toEqual(new Date("2020-01-01"));
+    // Not silently overridden by an "upcoming only" rule.
+    expect(startsAt.gt).toBeUndefined();
+  });
+
+  it("orders sessions chronologically", async () => {
+    // The model is answering "when can I see this". An unordered list makes it
+    // pick a time rather than the earliest one.
+    const prisma = fakePrisma({ movie: { id: "m1", title: "Inception" } });
+
+    await getShowtimes(27205, undefined, { prisma });
+
+    expect(prisma.session.findMany.mock.calls[0][0].orderBy).toEqual({ startsAt: "asc" });
   });
 
   it("says the film is unknown rather than returning a bare empty list", async () => {

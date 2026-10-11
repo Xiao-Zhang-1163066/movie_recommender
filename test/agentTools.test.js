@@ -206,8 +206,9 @@ describe("buildTools — wiring to implementations", () => {
     };
     await buildTools("u1", { prisma }).get_showtimes.execute({ tmdbId: 27205 });
 
-    // The uuid from the lookup, not the number the model passed.
-    expect(prisma.session.findMany.mock.calls[0][0].where).toEqual({ movieId: "m1" });
+    // The uuid from the lookup, not the number the model passed. The startsAt
+    // half of this where clause is covered in chatTools.test.js.
+    expect(prisma.session.findMany.mock.calls[0][0].where.movieId).toBe("m1");
   });
 
   it("embeds the description once and defaults the theatre filter to false", async () => {
