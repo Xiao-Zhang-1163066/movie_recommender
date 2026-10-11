@@ -1,0 +1,31 @@
+-- Restores the index that the previous migration dropped.
+--
+-- 20261010113642_add_agent_run_tool_errors added one column to "AgentRun" and,
+-- unasked, emitted `DROP INDEX "Movie_embedding_hnsw_idx"` alongside it. That is
+-- not a bug in that migration so much as a structural fact about this schema:
+-- Prisma cannot express an HNSW index in schema.prisma (`@@index(type:)` covers
+-- Hash, Gist, Gin, SpGist and Brin — hnsw comes from the pgvector extension and
+-- is not among them), and the column it sits on is `Unsupported("vector(768)")`.
+-- So every schema diff sees an index in the database with no counterpart in the
+-- schema, concludes it is surplus, and drops it.
+--
+-- This migration is hand-written for the same reason the original was: see
+-- 20260920115404_add_movie_embedding, which created the index in the first place.
+--
+-- IF NOT EXISTS, because this file has to be replayable in three states that all
+-- really occur here: a local database where the drop above has happened, a fresh
+-- database replaying the whole history in order, and production, where the drop
+-- has *not* happened because migrations against Neon are applied by hand and
+-- that one was never run there.
+--
+-- The recurrence is the part to remember, not the fix: this will happen again on
+-- the next `prisma migrate dev`, whatever that migration is for. The rule it
+-- forces is in CLAUDE.md — create migrations with `--create-only` and read the
+-- SQL before applying it.
+
+-- CreateIndex
+-- vector_cosine_ops must match the `<=>` operator findSimilarMovies uses. An
+-- index built with a different opclass is not an error: the planner silently
+-- ignores it, and the only symptom is a query that stays slow.
+CREATE INDEX IF NOT EXISTS "Movie_embedding_hnsw_idx"
+  ON "Movie" USING hnsw ("embedding" vector_cosine_ops);

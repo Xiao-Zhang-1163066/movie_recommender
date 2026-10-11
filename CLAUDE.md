@@ -49,7 +49,20 @@ as the error handler, and only errors from middleware registered before it reach
 
 **Prisma setup:** Schema is in `prisma/schema.prisma`; the generated client goes to
 `generated/prisma/`, not the default location. `prisma.config.ts` reads `DATABASE_URL` from
-`.env`. Run `prisma generate` after any schema change — forgetting is a recurring bug.
+`.env`. Run `prisma generate` after any schema change — forgetting is a recurring bug, and
+`migrate dev` does **not** do it for you here.
+
+**Never run `prisma migrate dev` without `--create-only`.** Always
+`npx prisma migrate dev --create-only --name <name>`, read the generated SQL, then apply it.
+The reason is `Movie.embedding`: it is `Unsupported("vector(768)")` and carries an HNSW index
+that `schema.prisma` cannot express (`@@index(type:)` offers Hash, Gist, Gin, SpGist and Brin;
+`hnsw` comes from the pgvector extension and is not among them). Every schema diff therefore
+sees an index with no counterpart in the schema and emits
+`DROP INDEX "Movie_embedding_hnsw_idx"` — attached to whatever unrelated change you were
+actually making. It happened on 2026-10-10 to a migration that only added one column, and it
+will happen again on the next one. Strip the `DropIndex` before applying;
+`20261011004812_restore_movie_embedding_hnsw_index` is the clean-up from the time it was not
+caught, and the HNSW `CREATE INDEX` statement to copy from lives in it.
 
 **Database:** Neon PostgreSQL. `DATABASE_URL` is the pooled (PgBouncer) connection used at
 runtime; `DIRECT_URL` bypasses the pooler and is what migrations use.
