@@ -50,6 +50,14 @@ describe("classifyToolError", () => {
     );
   });
 
+  it("separates a 404 from an outage, and must stay ahead of the upstream check", () => {
+    // isUpstreamError matches /^TMDB \d{3}$/, which takes 404 as readily as
+    // 503. Move this check below it and a model that invented an id is told the
+    // movie database is down — false, and nothing it can act on. The ordering
+    // is what makes this correct, so the assertion exists to pin the ordering.
+    expect(classifyToolError(new Error("TMDB 404"), "get_movie_details")).toBe("not_found");
+  });
+
   it("blames the embedding call only once the database is ruled out", () => {
     // find_similar_movies does exactly two things that can fail: the Postgres
     // query and the Gemini call. The database branch runs first, so an
@@ -65,7 +73,10 @@ describe("classifyToolError", () => {
 });
 
 describe("ToolFailure — the message the model reads", () => {
-  const kinds = ["timeout", "upstream", "database", "embedding", "unknown"];
+  const kinds = ["timeout", "upstream", "database", "embedding", "not_found", "unknown"];
+  // not_found is the exception: it is the only kind where another call is the
+  // right move, because the id was wrong rather than the dependency broken.
+  const noRetryKinds = kinds.filter((kind) => kind !== "not_found");
 
   it("gives every kind a message", () => {
     for (const kind of kinds) {
@@ -97,9 +108,20 @@ describe("ToolFailure — the message the model reads", () => {
   it("tells the model not to retry, because the step budget is the scarce thing", () => {
     // Sprint 3's finding: a turn that spends its eight steps re-calling a
     // broken tool never reaches recommend_movies at all.
-    for (const kind of kinds) {
+    for (const kind of noRetryKinds) {
       expect(new ToolFailure(kind).message, kind).toMatch(/do not call it again/i);
     }
+  });
+
+  it("sends the model after the right id instead, when the id was the problem", () => {
+    // The deliberate exception to the rule above. A wrong id is correctable in
+    // one step and the model has the means; "do not retry" would leave it
+    // telling the user about an outage that is not happening.
+    const message = new ToolFailure("not_found").message;
+    expect(message).toMatch(/do not send the same id again/i);
+    expect(message).toContain("search_movies");
+    // Must not claim the service is broken — that was the whole bug.
+    expect(message).not.toMatch(/unavailable|did not respond/i);
   });
 
   it("points the embedding failure at the tool that still works", () => {

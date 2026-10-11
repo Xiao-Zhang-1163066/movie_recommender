@@ -34,6 +34,15 @@ const MODEL_MESSAGES = {
   timeout: `The movie database did not respond in time. ${DO_NOT_RETRY}`,
   upstream: `The movie database (TMDB) is unavailable right now. ${DO_NOT_RETRY}`,
   database: `This app's own database could not be reached. ${DO_NOT_RETRY}`,
+  // The one kind that invites another call, because the fix is cheap and the
+  // model has the means. A 404 says the id was wrong, not that TMDB is down —
+  // and that is a correctable mistake, where every other kind here is a
+  // dependency the model cannot do anything about. Telling it "do not retry"
+  // would leave it reporting an outage that is not happening.
+  not_found:
+    "There is no film with that id on TMDB, so the id was wrong — the service itself is fine. " +
+    "Do not send the same id again. Look the title up with search_movies to get the correct " +
+    "id, or tell the user you could not find that film.",
   // The only kind with different advice, because there is a real alternative
   // to fall back to rather than just less of an answer.
   embedding:
@@ -70,6 +79,15 @@ function isTimeoutError(err) {
   return name === "AbortError" || name === "TimeoutError";
 }
 
+// Checked before isUpstreamError, which would otherwise swallow this: its
+// `TMDB \d{3}` pattern matches 404 as readily as 503. A model that invents an
+// id — or carries over a stale one — gets a 404, and reporting that as "the
+// movie database is unavailable" is both false and unactionable, while the real
+// answer ("wrong id, go and find the right one") is something it can act on.
+function isNotFoundError(err) {
+  return /^TMDB 404$/.test(String(err?.message ?? ""));
+}
+
 // `TMDB 500` is fetchWithRetry's own wording. `fetch failed` is undici's when
 // DNS or the socket gives out, which is still a failure to reach TMDB from the
 // model's point of view, so it gets the same message.
@@ -79,7 +97,7 @@ function isUpstreamError(err) {
 }
 
 /**
- * Which of the five kinds this is.
+ * Which kind this is.
  *
  * `toolName` is part of the decision, not decoration. find_similar_movies is
  * the only tool that embeds, and it can fail in exactly two ways: the Postgres
@@ -90,6 +108,8 @@ function isUpstreamError(err) {
 export function classifyToolError(err, toolName) {
   if (isDatabaseError(err)) return "database";
   if (isTimeoutError(err)) return "timeout";
+  // Before the general upstream check, which matches any TMDB status code.
+  if (isNotFoundError(err)) return "not_found";
   if (isUpstreamError(err)) return "upstream";
   if (toolName === "find_similar_movies") return "embedding";
   return "unknown";
