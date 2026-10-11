@@ -228,3 +228,115 @@ describe("buildTools — wiring to implementations", () => {
     expect(card).toMatchObject({ tmdbId: 603, title: "The Matrix", reason: "Cerebral.", inTheatre: true });
   });
 });
+
+describe("buildTools — error containment", () => {
+  // The SDK already keeps a throwing tool from ending the turn: it catches,
+  // emits a tool-error part, and feeds the error text back to the model as that
+  // call's result. What it does not decide is *what* text — it passes
+  // err.message through verbatim. These tests cover the layer that does.
+
+  function throwingPrisma(err) {
+    return { watchlistItem: { findMany: vi.fn().mockRejectedValue(err) } };
+  }
+
+  it("wraps every tool, so a tool added later cannot forget to opt in", async () => {
+    // Containment is applied as one pass over the finished object rather than
+    // tool by tool, which is the only version of this that stays true a year
+    // from now. This test is what makes that claim checkable: it breaks every
+    // dependency the layer has and walks the whole tool set, so a new tool is
+    // covered by existing, not by someone remembering to add a case.
+    const boom = () => Promise.reject(new Error("dependency down"));
+    const prisma = new Proxy(
+      {},
+      {
+        // $queryRaw is called directly; every other access is a model with
+        // methods on it. Both resolve to something that fails.
+        get: (_t, key) =>
+          String(key).startsWith("$") ? boom : new Proxy({}, { get: () => boom }),
+      },
+    );
+    // A 404 rather than a rejection: fetchWithRetry throws on a 4xx
+    // immediately, where a network error costs it 1.5 s of backoff first.
+    const fetchFn = vi.fn().mockResolvedValue({ ok: false, status: 404 });
+    const tools = buildTools("u1", {
+      prisma,
+      fetchFn,
+      embedQuery: boom,
+      cache: missingCache(),
+      apiKey: "k",
+    });
+
+    const inputs = {
+      get_user_watchlist: {},
+      get_taste_profile: {},
+      mark_watched: { movieId: "m1" },
+      search_movies: { query: "dune" },
+      get_movie_details: { movieId: "603" },
+      get_showtimes: { movieId: "m1" },
+      recommend_movies: { recommendations: [] },
+      find_similar_movies: { description: "slow and dreamlike" },
+    };
+
+    for (const [name, definition] of Object.entries(tools)) {
+      expect(inputs, `${name} has no input in this test`).toHaveProperty(name);
+      const thrown = await definition
+        .execute(inputs[name], {})
+        .then(() => null, (err) => err);
+      expect(thrown?.name, name).toBe("ToolFailure");
+    }
+  });
+
+  it("replaces a Prisma dump with a sentence written for the model", async () => {
+    const err = new Error(
+      'Invalid `prisma.watchlistItem.findMany()` invocation\n  SELECT "public"."WatchlistItem" ...',
+    );
+    err.name = "PrismaClientKnownRequestError";
+    const tools = buildTools("u1", { prisma: throwingPrisma(err) });
+
+    await expect(tools.get_user_watchlist.execute({}, {})).rejects.toMatchObject({
+      name: "ToolFailure",
+      kind: "database",
+    });
+    await expect(tools.get_user_watchlist.execute({}, {})).rejects.toThrow(
+      /do not call it again/i,
+    );
+  });
+
+  it("does not convert anything when the run is being cancelled", async () => {
+    // Stop aborts the run and abandons every in-flight call. A ToolFailure here
+    // would record a failure that never happened.
+    const err = new Error("TMDB 500");
+    const tools = buildTools("u1", { prisma: throwingPrisma(err) });
+
+    await expect(
+      tools.get_user_watchlist.execute({}, { abortSignal: { aborted: true } }),
+    ).rejects.toBe(err);
+  });
+
+  it("passes a successful result through untouched", async () => {
+    const rows = [{ id: "w1" }];
+    const prisma = { watchlistItem: { findMany: vi.fn().mockResolvedValue(rows) } };
+
+    await expect(buildTools("u1", { prisma }).get_user_watchlist.execute({}, {})).resolves.toBe(
+      rows,
+    );
+  });
+
+  it("keeps recommend_movies' array contract, which the controller spreads", async () => {
+    // Why failures are re-thrown rather than returned as { error }. The
+    // controller does assistantMovies.push(...output); handing it an object
+    // spreads a non-iterable, throws a TypeError into the outer catch, and
+    // kills a turn that was otherwise fine.
+    const err = new Error("TMDB 503");
+    const tools = buildTools("u1", {
+      prisma: { movie: { findMany: vi.fn().mockRejectedValue(err) } },
+    });
+
+    const result = await tools.recommend_movies
+      .execute({ recommendations: [{ tmdbId: 603, reason: "Cerebral." }] }, {})
+      .catch((e) => e);
+
+    expect(result).toBeInstanceOf(Error);
+    expect(result.kind).toBe("upstream");
+  });
+});

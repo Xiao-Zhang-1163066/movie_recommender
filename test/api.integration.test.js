@@ -297,7 +297,9 @@ describe("admin routes", () => {
       .mockResolvedValueOnce(1);
     prismaMock.$queryRaw
       .mockResolvedValueOnce([{ p50: 1000, p95: 5000, max: 22000 }])
-      .mockResolvedValueOnce([{ tool: "search_movies", count: 7 }]);
+      .mockResolvedValueOnce([
+        { tool: "search_movies", count: 7, failures: 1 },
+      ]);
 
     const res = await request(app)
       .get("/api/admin/agent-runs/summary")
@@ -307,9 +309,19 @@ describe("admin routes", () => {
     expect(res.body.data.errorRate).toBeCloseTo(0.2);
     expect(res.body.data.retryRate).toBeCloseTo(0.1);
     expect(res.body.data.latencyMs.p95).toBe(5000);
+    // A failure count per tool alongside the call count, so "search_movies
+    // failed 9 times" can be read as a rate rather than as a bare number.
     expect(res.body.data.toolUsage).toEqual([
-      { tool: "search_movies", count: 7 },
+      { tool: "search_movies", count: 7, failures: 1 },
     ]);
+
+    // $queryRaw is mocked, so the SQL above is never executed here and only a
+    // real database proves it runs. What this does pin is that the query still
+    // reads both arrays — deleting the toolErrors half would leave every
+    // `failures` at zero and look exactly like a healthy system.
+    const toolQuery = prismaMock.$queryRaw.mock.calls[1][0].join(" ");
+    expect(toolQuery).toContain("toolCalls");
+    expect(toolQuery).toContain("toolErrors");
   });
 
   it("reports zero rates instead of null when there are no runs", async () => {

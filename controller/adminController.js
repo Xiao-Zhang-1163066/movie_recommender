@@ -60,11 +60,24 @@ const getAgentRunSummary = async (req, res) => {
         FROM "AgentRun"
       `,
 
-      // unnest flattens the toolCalls array so each call becomes a row to group
-      // on. Doing this in JS would mean loading every row just to count strings.
+      // unnest flattens the arrays so each call becomes a row to group on.
+      // Doing this in JS would mean loading every row just to count strings.
+      //
+      // Both arrays in one pass, because a failure count on its own says very
+      // little: "search_movies failed 9 times" is alarming or irrelevant
+      // depending on whether it ran 12 times or 1,200. toolCalls records every
+      // call including the ones that failed, so it is the denominator and
+      // `failures / count` is the rate.
       prisma.$queryRaw`
-        SELECT tool, COUNT(*)::int AS count
-        FROM "AgentRun", unnest("toolCalls") AS tool
+        SELECT
+          tool,
+          COUNT(*) FILTER (WHERE NOT failed)::int AS count,
+          COUNT(*) FILTER (WHERE failed)::int     AS failures
+        FROM (
+          SELECT unnest("toolCalls")  AS tool, FALSE AS failed FROM "AgentRun"
+          UNION ALL
+          SELECT unnest("toolErrors") AS tool, TRUE  AS failed FROM "AgentRun"
+        ) AS events
         GROUP BY tool
         ORDER BY count DESC
       `,

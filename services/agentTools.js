@@ -11,6 +11,7 @@ import {
   findSimilarMovies,
 } from "../controller/chatTools.js";
 import { hasEmbeddingSupport } from "../services/embeddingService.js";
+import { toToolFailure } from "./toolErrors.js";
 
 /**
  * The tool set handed to the model, separated from the implementations in
@@ -156,5 +157,37 @@ export function buildTools(userId, deps = {}) {
     });
   }
 
-  return tools;
+  return containErrors(tools);
+}
+
+/**
+ * Re-wrap every tool so a thrown error reaches the model as a sentence written
+ * for it, rather than as whatever Prisma or undici happened to say.
+ *
+ * Applied in one pass over the finished object instead of tool by tool. There
+ * is no opt-in step to forget, so a tool added next year is covered by having
+ * been added at all — which is the only version of this that stays true.
+ *
+ * `tool()` from the SDK is the identity function, so these are plain objects
+ * and spreading one is safe. The second argument is the SDK's own
+ * ToolExecutionOptions; it is forwarded untouched because toToolFailure reads
+ * `abortSignal` off it to tell a cancelled run from a broken dependency.
+ */
+function containErrors(tools) {
+  return Object.fromEntries(
+    Object.entries(tools).map(([name, definition]) => [
+      name,
+      {
+        ...definition,
+        execute: async (input, options) => {
+          try {
+            return await definition.execute(input, options);
+          } catch (err) {
+            console.error(`Tool ${name} failed:`, err);
+            throw toToolFailure(err, name, options);
+          }
+        },
+      },
+    ]),
+  );
 }

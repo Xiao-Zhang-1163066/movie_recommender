@@ -314,6 +314,10 @@ export const chat = async (req, res, next) => {
     // now only the browser kept a running copy of the reply.
     let assistantText = "";
     let assistantMovies = [];
+    // Names of the tool calls that failed, in order. Sprint 2 built the log to
+    // answer "which tool fails most often" and could not: a tool-error was
+    // dropped on the floor here, so every row looked like a clean run.
+    let toolErrors = [];
     // Set when the SDK reports a model or tool failure. The empty-reply retry
     // below is for a turn that ran cleanly but said nothing; retrying a turn that
     // already told the user it failed would just spend quota and confuse them.
@@ -349,11 +353,36 @@ export const chat = async (req, res, next) => {
           part.type === "tool-result" &&
           part.toolName === "recommend_movies"
         ) {
-          assistantMovies.push(...part.output);
-          res.write(JSON.stringify({ t: "movies", v: part.output }) + "\n");
+          // Guarded because a non-array here used to be fatal: spreading a
+          // plain object throws a TypeError into the outer catch and kills a
+          // turn that was otherwise fine. The cost of this tool returning an
+          // unexpected shape should be one missing card, not the whole answer.
+          if (Array.isArray(part.output)) {
+            assistantMovies.push(...part.output);
+            res.write(JSON.stringify({ t: "movies", v: part.output }) + "\n");
+          } else {
+            console.error("recommend_movies returned a non-array:", part.output);
+          }
+        } else if (part.type === "tool-error") {
+          // Not a failed turn. The SDK hands the error text back to the model
+          // as that call's result and the step loop continues, so the right
+          // move is to record it and let the model carry on — not to tell the
+          // user the chat broke when it is still about to answer them.
+          //
+          // Reusing the `tool` event rather than inventing a second one keeps
+          // the client's stream union small, and `failed` is absent from every
+          // event today's frontend handles, so an un-updated client simply
+          // renders the pill it already rendered.
+          console.error(`Tool ${part.toolName} errored:`, part.error);
+          toolErrors.push(part.toolName);
+          res.write(
+            JSON.stringify({ t: "tool", v: { name: part.toolName, failed: true } }) + "\n",
+          );
         } else if (part.type === "error") {
-          // The SDK surfaces model/tool failures as a stream part rather than
-          // throwing — classify and forward so the client can show targeted help.
+          // A model- or provider-level failure, not a tool one: a throwing
+          // tool arrives as the tool-error part above and leaves the run
+          // alive. Reaching here means the turn itself is over, so classify
+          // and forward so the client can show targeted help.
           console.error("Chat fullStream error part:", part.error);
           const kind = classifyModelError(part.error);
           errorKind = kind;
@@ -487,6 +516,10 @@ export const chat = async (req, res, next) => {
         toolCalls: steps.flatMap((step) =>
           (step.toolCalls ?? []).map((call) => call.toolName),
         ),
+        // Kept separate from toolCalls rather than subtracted from it: the
+        // order and the duplicates in toolCalls are the signal there, and a
+        // failure is a different question asked of the same turn.
+        toolErrors,
         steps: steps.length,
         finishReason,
         latencyMs: Date.now() - startedAt,

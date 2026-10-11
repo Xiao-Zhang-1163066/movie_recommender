@@ -200,3 +200,110 @@ describe("chat() — what reaches the run log", () => {
     expect(endedWhenLogged).toBe(true);
   });
 });
+
+describe("chat() — a tool that fails", () => {
+  // A failed tool is not a failed turn. The SDK catches the throw, emits a
+  // tool-error part, and hands the error text back to the model as that call's
+  // result, so the step loop carries on and usually still answers. Before this,
+  // the controller had no tool-error branch at all: the part fell through every
+  // else-if and was dropped, which left the log showing a clean run and the
+  // user watching a progress pill that never resolved.
+
+  const toolError = (toolName) => ({
+    type: "tool-error",
+    toolName,
+    error: new Error("This app's own database could not be reached."),
+  });
+
+  it("records which tools failed, without marking the turn as errored", async () => {
+    streamText.mockImplementation(
+      fakeRun([
+        toolError("get_user_watchlist"),
+        { type: "text-delta", text: "I could not read your watchlist, but here is a pick." },
+      ]),
+    );
+
+    await chat(req(), fakeRes(), vi.fn());
+
+    expect(loggedRow()).toMatchObject({
+      toolErrors: ["get_user_watchlist"],
+      // The user got an answer. Setting errored here would make every
+      // flaky-dependency turn look like a broken one.
+      errored: false,
+      errorKind: null,
+    });
+  });
+
+  it("keeps the order and the duplicates, like toolCalls", async () => {
+    // Sprint 2's reason for keeping toolCalls unsorted and un-deduplicated: the
+    // same name three times running is the signal, and a set would hide it.
+    streamText.mockImplementation(
+      fakeRun([
+        toolError("search_movies"),
+        toolError("search_movies"),
+        toolError("get_movie_details"),
+        { type: "text-delta", text: "Sorry, lookups are down." },
+      ]),
+    );
+
+    await chat(req(), fakeRes(), vi.fn());
+
+    expect(loggedRow().toolErrors).toEqual([
+      "search_movies",
+      "search_movies",
+      "get_movie_details",
+    ]);
+  });
+
+  it("records an empty list for a turn where nothing failed", async () => {
+    streamText.mockImplementation(fakeRun([{ type: "text-delta", text: "Two picks." }]));
+
+    await chat(req(), fakeRes(), vi.fn());
+
+    expect(loggedRow().toolErrors).toEqual([]);
+  });
+
+  it("tells the client the pill failed, rather than leaving it spinning", async () => {
+    streamText.mockImplementation(
+      fakeRun([
+        { type: "tool-call", toolName: "search_movies" },
+        toolError("search_movies"),
+        { type: "text-delta", text: "Could not look that up." },
+      ]),
+    );
+
+    const res = fakeRes();
+    await chat(req(), res, vi.fn());
+
+    const pills = res.written.filter((line) => line.t === "tool");
+    expect(pills).toEqual([
+      { t: "tool", v: { name: "search_movies" } },
+      // Reuses the `tool` event rather than inventing a second one. `failed` is
+      // absent from every event the current frontend handles, so a client that
+      // has not been updated renders the pill it already rendered.
+      { t: "tool", v: { name: "search_movies", failed: true } },
+    ]);
+    // No error line: the turn is still alive and about to answer.
+    expect(res.written.some((line) => line.t === "error")).toBe(false);
+  });
+
+  it("survives recommend_movies returning something that is not an array", async () => {
+    // Why tool failures are re-thrown rather than returned as { error }. The
+    // controller spreads this output; an object would spread a non-iterable,
+    // throw a TypeError into the outer catch, and kill a turn that was fine.
+    // The guard makes the cost one missing card instead.
+    streamText.mockImplementation(
+      fakeRun([
+        { type: "text-delta", text: "Here are two picks." },
+        { type: "tool-result", toolName: "recommend_movies", output: { error: "nope" } },
+      ]),
+    );
+
+    const res = fakeRes();
+    await chat(req(), res, vi.fn());
+
+    expect(res.written.some((line) => line.t === "movies")).toBe(false);
+    expect(res.written.some((line) => line.t === "error")).toBe(false);
+    expect(loggedRow()).toMatchObject({ errored: false });
+  });
+});

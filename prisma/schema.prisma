@@ -205,6 +205,13 @@ model AgentRun {
   // "search_movies" eight times running is the signature of a model stuck in a
   // loop, and a count or a de-duplicated set would hide exactly that.
   toolCalls      String[] @default([])
+  // The names of the calls that failed, in order. Separate from toolCalls
+  // rather than carved out of it: the order and the duplicates there are the
+  // signal ("search_movies" eight times running), and a failure is a different
+  // question asked of the same turn. A pre-migration row holding an empty list
+  // is correct, not missing data — it recorded no failures because nothing here
+  // was recording them.
+  toolErrors     String[] @default([])
   steps          Int?
   finishReason   String?
   // True when the first attempt produced no text and the no-tools retry ran.
