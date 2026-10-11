@@ -10,9 +10,8 @@ vi.mock("../config/redis.js", () => ({
   cache: { get: vi.fn(), set: vi.fn(), del: vi.fn() },
 }));
 
-const { searchMovies, getTasteProfile, markWatched, findSimilarMovies } = await import(
-  "../controller/chatTools.js"
-);
+const { searchMovies, getTasteProfile, markWatched, findSimilarMovies, fetchWithRetry } =
+  await import("../controller/chatTools.js");
 
 // These import the real tool implementations that chatController.js runs.
 // An earlier version of this file re-implemented each function locally because
@@ -297,5 +296,48 @@ describe("findSimilarMovies tool", () => {
       inTheatre: false,
       similarity: 0.735,
     });
+  });
+});
+
+describe("fetchWithRetry", () => {
+  // This function had no test of its own, which is how its code and its comment
+  // came to disagree: the "don't retry 4xx" throw sat inside the try and was
+  // caught by that try's own catch, so every 404 cost three round-trips and
+  // 1.5 s of backoff. Retry policy is exactly the kind of thing that fails
+  // quietly — it only ever shows up as latency and spent quota.
+  const ok = { ok: true, status: 200 };
+
+  it("returns the first successful response without retrying", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(ok);
+    await expect(fetchWithRetry("u", { fetchFn })).resolves.toBe(ok);
+    expect(fetchFn).toHaveBeenCalledOnce();
+  });
+
+  it("gives up on a 4xx after one attempt, because it will fail identically", async () => {
+    const fetchFn = vi.fn().mockResolvedValue({ ok: false, status: 404 });
+    await expect(fetchWithRetry("u", { fetchFn })).rejects.toThrow("TMDB 404");
+    expect(fetchFn).toHaveBeenCalledOnce();
+  });
+
+  it("retries a 5xx up to maxAttempts and reports the last status", async () => {
+    const fetchFn = vi.fn().mockResolvedValue({ ok: false, status: 503 });
+    await expect(fetchWithRetry("u", { fetchFn, maxAttempts: 2 })).rejects.toThrow("TMDB 503");
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries a network error and succeeds on a later attempt", async () => {
+    const fetchFn = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError("fetch failed"))
+      .mockResolvedValue(ok);
+    await expect(fetchWithRetry("u", { fetchFn, maxAttempts: 2 })).resolves.toBe(ok);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+
+  it("surfaces the network error itself once the attempts run out", async () => {
+    // The message matters downstream: classifyToolError reads "fetch failed"
+    // as an upstream failure rather than an unknown one.
+    const fetchFn = vi.fn().mockRejectedValue(new TypeError("fetch failed"));
+    await expect(fetchWithRetry("u", { fetchFn, maxAttempts: 1 })).rejects.toThrow("fetch failed");
   });
 });

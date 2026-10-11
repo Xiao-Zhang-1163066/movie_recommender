@@ -20,6 +20,13 @@ export const TMDB_IMG_BASE = "https://image.tmdb.org/t/p/w500";
 // Wraps fetch with a per-request timeout and exponential-backoff retries.
 // Only retries on network errors and 5xx responses — 4xx are caller errors and
 // should surface immediately rather than burning quota retrying a bad request.
+//
+// The status check sits *outside* the try on purpose. It used to be inside it,
+// as `if (res.status < 500) throw ...` with a "don't retry 4xx" comment, and
+// that throw was caught by its own catch two lines below and retried like any
+// network error — so every 404 cost three round-trips and 1.5 s of backoff
+// while the comment claimed otherwise. The function had no test of its own,
+// which is how the code and the comment got to disagree for that long.
 export async function fetchWithRetry(
   url,
   { maxAttempts = 3, timeoutMs = 8_000, fetchFn = fetch } = {},
@@ -28,15 +35,18 @@ export async function fetchWithRetry(
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let res;
     try {
-      const res = await fetchFn(url, { signal: controller.signal });
-      if (res.ok) return res;
-      if (res.status < 500) throw new Error(`TMDB ${res.status}`); // don't retry 4xx
-      lastError = new Error(`TMDB ${res.status}`);
+      res = await fetchFn(url, { signal: controller.signal });
     } catch (err) {
       lastError = err; // network error or timeout — fall through to retry
     } finally {
       clearTimeout(timer);
+    }
+    if (res) {
+      if (res.ok) return res;
+      if (res.status < 500) throw new Error(`TMDB ${res.status}`); // caller error, never retried
+      lastError = new Error(`TMDB ${res.status}`);
     }
     if (attempt < maxAttempts) {
       // 500 ms → 1 000 ms backoff
