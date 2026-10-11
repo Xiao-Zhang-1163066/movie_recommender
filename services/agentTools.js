@@ -62,16 +62,22 @@ export function buildTools(userId, deps = {}) {
       execute: async () => getTasteProfile(userId, deps),
     }),
 
+    // tmdbId, not movieId. This asked for an internal Movie.id uuid, which no
+    // tool has ever put in front of the model — so it had to invent one and the
+    // write failed on the foreign key every time. The id is resolved to a row
+    // inside markWatched now, and the film is created from TMDB if we have
+    // never seen it.
     mark_watched: tool({
       description:
-        "Mark a movie as watched for the logged-in user, optionally with a rating (1-10) and notes",
+        "Mark a movie as watched for the logged-in user, optionally with a rating (1-10) and notes. " +
+        "Pass the film's TMDB id, the same id search_movies and the now-showing list return.",
       inputSchema: z.object({
-        movieId: z.string(),
+        tmdbId: z.number(),
         rating: z.number().min(1).max(10).optional(),
         notes: z.string().optional(),
       }),
-      execute: async ({ movieId, rating, notes }) =>
-        markWatched(userId, movieId, rating, notes, deps),
+      execute: async ({ tmdbId, rating, notes }) =>
+        markWatched(userId, tmdbId, rating, notes, deps),
     }),
 
     // "when the user names a film" is the half that matters now that a second
@@ -94,14 +100,21 @@ export function buildTools(userId, deps = {}) {
       execute: async ({ movieId }) => getMovieDetails(movieId, deps),
     }),
 
+    // Same correction as mark_watched, and the same cause: this filtered
+    // Session.movieId, a foreign key to Movie.id, with whatever the model
+    // guessed. It returned [] every time, which reads as "nothing scheduled"
+    // rather than as a failure, so the model told users films were not playing
+    // when they were.
     get_showtimes: tool({
       description:
-        "Get cinema showtimes for a specific movie, optionally filtered by date (YYYY-MM-DD format)",
+        "Get cinema showtimes for a specific movie, optionally filtered by date (YYYY-MM-DD format). " +
+        "Pass the film's TMDB id. Returns found: false when the film is not in the Christchurch " +
+        "listings at all, which is different from being listed with no upcoming sessions.",
       inputSchema: z.object({
-        movieId: z.string(),
+        tmdbId: z.number(),
         date: z.string().optional(),
       }),
-      execute: async ({ movieId, date }) => getShowtimes(movieId, date, deps),
+      execute: async ({ tmdbId, date }) => getShowtimes(tmdbId, date, deps),
     }),
 
     recommend_movies: tool({

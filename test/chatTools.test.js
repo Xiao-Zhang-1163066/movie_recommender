@@ -10,8 +10,15 @@ vi.mock("../config/redis.js", () => ({
   cache: { get: vi.fn(), set: vi.fn(), del: vi.fn() },
 }));
 
-const { searchMovies, getTasteProfile, markWatched, findSimilarMovies, fetchWithRetry } =
-  await import("../controller/chatTools.js");
+const {
+  searchMovies,
+  getTasteProfile,
+  markWatched,
+  getShowtimes,
+  findSimilarMovies,
+  fetchWithRetry,
+  TMDB_IMG_BASE,
+} = await import("../controller/chatTools.js");
 
 // These import the real tool implementations that chatController.js runs.
 // An earlier version of this file re-implemented each function locally because
@@ -22,6 +29,15 @@ const { searchMovies, getTasteProfile, markWatched, findSimilarMovies, fetchWith
 // A cache stub that always misses, so the TMDB path is the one under test.
 function missingCache() {
   return { get: vi.fn().mockResolvedValue(null), set: vi.fn() };
+}
+
+// A fetch stub returning one successful TMDB payload.
+function okJson(body) {
+  return vi.fn().mockResolvedValue({
+    ok: true,
+    status: 200,
+    json: () => Promise.resolve(body),
+  });
 }
 
 describe("searchMovies tool", () => {
@@ -192,22 +208,40 @@ describe("getTasteProfile tool", () => {
 });
 
 describe("markWatched tool", () => {
-  it("calls upsert with correct arguments and returns success", async () => {
-    const prisma = {
+  // The parameter used to be a Movie.id uuid, which no tool has ever shown the
+  // model — so it guessed, and the write failed on the foreign key. These tests
+  // are written against the TMDB id it actually holds.
+
+  const TMDB_DETAILS = {
+    id: 27205,
+    title: "Inception",
+    release_date: "2010-07-15",
+    overview: "A thief who steals corporate secrets.",
+    runtime: 148,
+    vote_average: 8.4,
+    poster_path: "/poster.jpg",
+    genres: [{ name: "Science Fiction" }, { name: "Action" }],
+  };
+
+  function fakePrisma({ movie = null } = {}) {
+    return {
+      movie: {
+        findUnique: vi.fn().mockResolvedValue(movie),
+        upsert: vi.fn().mockResolvedValue({ id: "movie-456", title: "Inception" }),
+      },
       watchlistItem: { upsert: vi.fn().mockResolvedValue({}) },
     };
+  }
 
-    // movieId is a uuid string — WatchlistItem.movieId is String in the Prisma
-    // schema and the tool's inputSchema is z.string().
-    const result = await markWatched(
-      "user-123",
-      "movie-456",
-      9,
-      "Loved it!",
-      { prisma },
-    );
+  it("resolves the TMDB id to the internal row before writing", async () => {
+    // The whole point of the change: WatchlistItem.movieId is a uuid, and that
+    // uuid now comes from a lookup rather than from the model.
+    const prisma = fakePrisma({ movie: { id: "movie-456", title: "Inception" } });
 
-    expect(result).toEqual({ success: true });
+    const result = await markWatched("user-123", 27205, 9, "Loved it!", { prisma });
+
+    expect(prisma.movie.findUnique).toHaveBeenCalledWith({ where: { tmdbId: 27205 } });
+    expect(result).toEqual({ success: true, title: "Inception" });
 
     // upsert returns nothing useful, so the call arguments are the only thing
     // that proves the write was correct.
@@ -222,6 +256,160 @@ describe("markWatched tool", () => {
         notes: "Loved it!",
       },
     });
+  });
+
+  it("costs no network call when the film is already on file", async () => {
+    const prisma = fakePrisma({ movie: { id: "movie-456", title: "Inception" } });
+    const fetchFn = vi.fn();
+
+    await markWatched("user-123", 27205, undefined, undefined, { prisma, fetchFn });
+
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(prisma.movie.upsert).not.toHaveBeenCalled();
+  });
+
+  it("creates the film from TMDB when we have never seen it", async () => {
+    // Our Movie table holds the ~90 scraped Christchurch films. A user can
+    // plausibly have watched anything, so an unknown film is created rather
+    // than refused.
+    const prisma = fakePrisma({ movie: null });
+    const fetchFn = okJson(TMDB_DETAILS);
+
+    const result = await markWatched("user-123", 27205, 8, undefined, {
+      prisma,
+      fetchFn,
+      cache: missingCache(),
+      apiKey: "k",
+    });
+
+    expect(result).toEqual({ success: true, title: "Inception" });
+
+    // Every field comes from TMDB. The model passed one number, so there is no
+    // field here it could have invented.
+    expect(prisma.movie.upsert).toHaveBeenCalledWith({
+      where: { tmdbId: 27205 },
+      update: {},
+      create: {
+        tmdbId: 27205,
+        title: "Inception",
+        overview: "A thief who steals corporate secrets.",
+        releaseYear: 2010,
+        genres: ["Science Fiction", "Action"],
+        runtime: 148,
+        voteAverage: 8.4,
+        posterUrl: `${TMDB_IMG_BASE}/poster.jpg`,
+        createdBy: "user-123",
+      },
+    });
+  });
+
+  it("upserts rather than creates, so two turns at once cannot collide", async () => {
+    // Both would miss the findUnique above and the second create would hit the
+    // tmdbId unique constraint.
+    const prisma = fakePrisma({ movie: null });
+
+    await markWatched("user-123", 27205, undefined, undefined, {
+      prisma,
+      fetchFn: okJson(TMDB_DETAILS),
+      cache: missingCache(),
+      apiKey: "k",
+    });
+
+    expect(prisma.movie.upsert).toHaveBeenCalledOnce();
+    expect(prisma.movie.upsert.mock.calls[0][0].update).toEqual({});
+  });
+
+  it("answers instead of throwing when TMDB has no release date", async () => {
+    // Movie.releaseYear is a required Int, so there is nothing to store.
+    // Letting Prisma reject it would reach the model as "the database could not
+    // be reached" — false, and the misdirection the not_found kind exists to
+    // avoid. Nothing is broken here, so this is a return value, not a throw.
+    const prisma = fakePrisma({ movie: null });
+
+    const result = await markWatched("user-123", 27205, undefined, undefined, {
+      prisma,
+      fetchFn: okJson({ ...TMDB_DETAILS, release_date: "" }),
+      cache: missingCache(),
+      apiKey: "k",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.reason).toMatch(/release date/i);
+    // Nothing was written on the way out.
+    expect(prisma.movie.upsert).not.toHaveBeenCalled();
+    expect(prisma.watchlistItem.upsert).not.toHaveBeenCalled();
+  });
+
+  it("returns the title, so marking the wrong film is visible", async () => {
+    // "done" on its own confirms nothing about which film was meant. This is
+    // the model's only chance to notice, and the user's only chance to catch it.
+    const prisma = fakePrisma({ movie: { id: "m1", title: "The Godfather" } });
+
+    const result = await markWatched("user-123", 238, undefined, undefined, { prisma });
+
+    expect(result.title).toBe("The Godfather");
+  });
+});
+
+describe("getShowtimes tool", () => {
+  // This filtered Session.movieId — a foreign key to Movie.id — with whatever
+  // the model guessed, so it returned [] every time. Worse than mark_watched's
+  // version of the same bug, because [] is a *valid* answer meaning "nothing
+  // scheduled", so the model told users films were not playing when they were.
+
+  function fakePrisma({ movie = null, sessions = [] } = {}) {
+    return {
+      movie: { findUnique: vi.fn().mockResolvedValue(movie) },
+      session: { findMany: vi.fn().mockResolvedValue(sessions) },
+    };
+  }
+
+  it("resolves the TMDB id and filters sessions on the internal uuid", async () => {
+    const sessions = [{ id: "s1", cinema: { name: "Hoyts Riccarton" } }];
+    const prisma = fakePrisma({ movie: { id: "movie-456", title: "Inception" }, sessions });
+
+    const result = await getShowtimes(27205, undefined, { prisma });
+
+    expect(prisma.movie.findUnique).toHaveBeenCalledWith({
+      where: { tmdbId: 27205 },
+      select: { id: true, title: true },
+    });
+    // The uuid from the lookup, never the number the model passed.
+    expect(prisma.session.findMany.mock.calls[0][0].where).toEqual({ movieId: "movie-456" });
+    expect(result).toEqual({ found: true, title: "Inception", sessions });
+  });
+
+  it("says the film is unknown rather than returning a bare empty list", async () => {
+    // "we have no such film" and "that film has no sessions" are different
+    // things to tell a user, and [] cannot say which.
+    const prisma = fakePrisma({ movie: null });
+
+    const result = await getShowtimes(999999, undefined, { prisma });
+
+    expect(result).toEqual({ found: false, title: null, sessions: [] });
+    // No point querying sessions for a film we do not have.
+    expect(prisma.session.findMany).not.toHaveBeenCalled();
+  });
+
+  it("reports an empty schedule as found, which is the other half of that", async () => {
+    const prisma = fakePrisma({ movie: { id: "m1", title: "Inception" }, sessions: [] });
+
+    expect(await getShowtimes(27205, undefined, { prisma })).toEqual({
+      found: true,
+      title: "Inception",
+      sessions: [],
+    });
+  });
+
+  it("narrows to a single day when a date is given", async () => {
+    const prisma = fakePrisma({ movie: { id: "m1", title: "Inception" } });
+
+    await getShowtimes(27205, "2026-10-15", { prisma });
+
+    const { startsAt } = prisma.session.findMany.mock.calls[0][0].where;
+    expect(startsAt.gte).toEqual(new Date("2026-10-15"));
+    // Exclusive upper bound one day on, so a session at 23:59 is still included.
+    expect(startsAt.lt).toEqual(new Date("2026-10-16"));
   });
 });
 

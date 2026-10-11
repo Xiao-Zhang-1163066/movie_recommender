@@ -79,12 +79,25 @@ describe("buildTools — input schemas", () => {
     expect(accepts("get_user_watchlist", { status: "FINISHED" })).toBe(false);
   });
 
-  it("mark_watched requires a movieId and bounds the rating to 1–10", () => {
-    expect(accepts("mark_watched", { movieId: "m1", rating: 8 })).toBe(true);
-    expect(accepts("mark_watched", { movieId: "m1" })).toBe(true);
+  it("mark_watched takes a numeric tmdbId and bounds the rating to 1–10", () => {
+    expect(accepts("mark_watched", { tmdbId: 27205, rating: 8 })).toBe(true);
+    expect(accepts("mark_watched", { tmdbId: 27205 })).toBe(true);
     expect(accepts("mark_watched", { rating: 8 })).toBe(false);
-    expect(accepts("mark_watched", { movieId: "m1", rating: 0 })).toBe(false);
-    expect(accepts("mark_watched", { movieId: "m1", rating: 11 })).toBe(false);
+    expect(accepts("mark_watched", { tmdbId: 27205, rating: 0 })).toBe(false);
+    expect(accepts("mark_watched", { tmdbId: 27205, rating: 11 })).toBe(false);
+  });
+
+  it("mark_watched rejects the internal uuid it used to ask for", () => {
+    // The old schema was z.string(), which accepted a Movie.id uuid the model
+    // has never been shown and could only invent. A number cannot be guessed
+    // the same way: every id the model holds came out of a tool result.
+    expect(accepts("mark_watched", { movieId: "a3f8c2e1-9b4d-4f7a-8e52-1c6d0b9a7e34" })).toBe(
+      false,
+    );
+    // A numeric id as a string is the likeliest remaining mistake, since ids
+    // arrive in prose. The schema is what turns that into a retryable tool
+    // error rather than a lookup for the film with tmdbId "27205".
+    expect(accepts("mark_watched", { tmdbId: "27205" })).toBe(false);
   });
 
   it("search_movies and get_movie_details require their one argument", () => {
@@ -100,10 +113,13 @@ describe("buildTools — input schemas", () => {
     expect(accepts("find_similar_movies", {})).toBe(false);
   });
 
-  it("get_showtimes requires a movieId and makes the date optional", () => {
-    expect(accepts("get_showtimes", { movieId: "m1" })).toBe(true);
-    expect(accepts("get_showtimes", { movieId: "m1", date: "2026-09-15" })).toBe(true);
+  it("get_showtimes takes a numeric tmdbId and makes the date optional", () => {
+    expect(accepts("get_showtimes", { tmdbId: 27205 })).toBe(true);
+    expect(accepts("get_showtimes", { tmdbId: 27205, date: "2026-09-15" })).toBe(true);
     expect(accepts("get_showtimes", { date: "2026-09-15" })).toBe(false);
+    // Same correction as mark_watched: this asked for a uuid it filtered
+    // Session.movieId with, and silently matched nothing.
+    expect(accepts("get_showtimes", { movieId: "m1" })).toBe(false);
   });
 
   it("recommend_movies requires a numeric tmdbId and a reason for every pick", () => {
@@ -152,13 +168,19 @@ describe("buildTools — wiring to implementations", () => {
   });
 
   it("passes every mark_watched argument through, with the user's id", async () => {
-    const prisma = { watchlistItem: { upsert: vi.fn().mockResolvedValue({}) } };
+    const prisma = {
+      movie: { findUnique: vi.fn().mockResolvedValue({ id: "m1", title: "Inception" }) },
+      watchlistItem: { upsert: vi.fn().mockResolvedValue({}) },
+    };
     await buildTools("u1", { prisma }).mark_watched.execute({
-      movieId: "m1",
+      tmdbId: 27205,
       rating: 9,
       notes: "Loved it",
     });
 
+    // The TMDB id is looked up; the uuid written to WatchlistItem comes from
+    // that lookup and never from the model.
+    expect(prisma.movie.findUnique).toHaveBeenCalledWith({ where: { tmdbId: 27205 } });
     expect(prisma.watchlistItem.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { userId_movieId: { userId: "u1", movieId: "m1" } },
@@ -177,10 +199,14 @@ describe("buildTools — wiring to implementations", () => {
     expect(fetchFn.mock.calls[0][0]).toContain("query=blade%20runner");
   });
 
-  it("forwards the movie id and date to get_showtimes", async () => {
-    const prisma = { session: { findMany: vi.fn().mockResolvedValue([]) } };
-    await buildTools("u1", { prisma }).get_showtimes.execute({ movieId: "m1" });
+  it("resolves the tmdbId before querying sessions in get_showtimes", async () => {
+    const prisma = {
+      movie: { findUnique: vi.fn().mockResolvedValue({ id: "m1", title: "Inception" }) },
+      session: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+    await buildTools("u1", { prisma }).get_showtimes.execute({ tmdbId: 27205 });
 
+    // The uuid from the lookup, not the number the model passed.
     expect(prisma.session.findMany.mock.calls[0][0].where).toEqual({ movieId: "m1" });
   });
 
@@ -269,10 +295,10 @@ describe("buildTools — error containment", () => {
     const inputs = {
       get_user_watchlist: {},
       get_taste_profile: {},
-      mark_watched: { movieId: "m1" },
+      mark_watched: { tmdbId: 27205 },
       search_movies: { query: "dune" },
       get_movie_details: { movieId: "603" },
-      get_showtimes: { movieId: "m1" },
+      get_showtimes: { tmdbId: 27205 },
       recommend_movies: { recommendations: [] },
       find_similar_movies: { description: "slow and dreamlike" },
     };

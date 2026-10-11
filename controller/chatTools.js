@@ -92,22 +92,126 @@ export async function getTasteProfile(userId, { prisma = defaultPrisma } = {}) {
   };
 }
 
+/**
+ * Turn a TMDB id into the internal Movie row, creating it from TMDB if we have
+ * never seen the film.
+ *
+ * Every tool hands the model a `tmdbId` — search results, semantic search, the
+ * now-showing list in the system prompt — and no tool has ever shown it a
+ * `Movie.id`. So a tool parameter typed as an internal id is a parameter the
+ * model can only guess at, which is why this exists.
+ *
+ * The important part is where the metadata comes from. `addToWatchlist` in
+ * watchlistController.js does the same find-or-create, but reads title, poster
+ * and overview out of the request body — fine, because a browser form is
+ * quoting a film it was shown. Here the caller is a language model, and a
+ * `title` parameter would be a field it could invent, so the only thing it may
+ * pass is the number and everything else is fetched. Every row this creates
+ * therefore carries real TMDB metadata.
+ *
+ * Stated precisely, because it is easy to oversell: this does not stop the
+ * model passing a real id for the wrong film — that risk is the same one
+ * recommend_movies already carries. What it stops is invented strings reaching
+ * the database.
+ *
+ * Returns null when TMDB has no release date. `Movie.releaseYear` is a required
+ * Int, so there is nothing to store, and letting Prisma reject it would surface
+ * to the model as "the database could not be reached" — false, and the same
+ * misdirection the not_found kind was added to fix.
+ *
+ * No embedding is written. The backfill job finds rows whose hash does not
+ * match and embeds them on its next run, so a new row is picked up without this
+ * request waiting on an API call it does not need.
+ */
+async function findOrCreateMovieByTmdbId(
+  tmdbId,
+  userId,
+  { prisma, fetchFn, cache, apiKey },
+) {
+  // Fast path first: a film already on file costs one indexed lookup and no
+  // network at all. tmdbId is @unique, so this is a primary-key-grade read.
+  const existing = await prisma.movie.findUnique({ where: { tmdbId } });
+  if (existing) return existing;
+
+  // Same cache key as getMovieDetails and recommendMovies, so a film the model
+  // has already looked at this turn is free here.
+  const data = await fetchTmdbCached(
+    `https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${apiKey}`,
+    `tmdb:movie:${tmdbId}`,
+    86_400, // 24 h
+    { fetchFn, cache },
+  );
+
+  const releaseYear = data.release_date
+    ? Number(data.release_date.slice(0, 4))
+    : null;
+  if (!releaseYear) return null;
+
+  // upsert, not create: two turns marking the same film at once would both miss
+  // the lookup above and the second create would hit the tmdbId unique
+  // constraint. `update: {}` because the only thing being asserted is that the
+  // row exists — we are not the owner of this data, the scraper is.
+  return prisma.movie.upsert({
+    where: { tmdbId: data.id },
+    update: {},
+    create: {
+      tmdbId: data.id,
+      title: data.title,
+      overview: data.overview ?? null,
+      releaseYear,
+      genres: data.genres?.map((genre) => genre.name) ?? [],
+      runtime: data.runtime ?? null,
+      voteAverage: data.vote_average ?? null,
+      posterUrl: data.poster_path ? `${TMDB_IMG_BASE}${data.poster_path}` : null,
+      createdBy: userId,
+    },
+  });
+}
+
 export async function markWatched(
   userId,
-  movieId,
+  tmdbId,
   rating,
   notes,
-  { prisma = defaultPrisma } = {},
+  {
+    prisma = defaultPrisma,
+    fetchFn = fetch,
+    cache = defaultCache,
+    apiKey = process.env.TMDB_API_KEY,
+  } = {},
 ) {
+  const movie = await findOrCreateMovieByTmdbId(tmdbId, userId, {
+    prisma,
+    fetchFn,
+    cache,
+    apiKey,
+  });
+
+  // Returned, not thrown. This is an answer the model can pass on, not a
+  // dependency failing: nothing is broken, the film simply cannot be stored.
+  // Phase 1's rule is that failures throw so they stay a tool-error; an
+  // outcome like this one belongs in the return value alongside success.
+  if (!movie) {
+    return {
+      success: false,
+      reason:
+        "TMDB has no release date for that film, so it cannot be stored. Tell the user you could not record that one.",
+    };
+  }
+
   // The WatchlistItem schema has @@unique([userId, movieId]), which Prisma
   // exposes as a compound key called userId_movieId. The where for upsert must
   // use it.
   await prisma.watchlistItem.upsert({
-    where: { userId_movieId: { userId, movieId } },
+    where: { userId_movieId: { userId, movieId: movie.id } },
     update: { status: "COMPLETED", rating, notes },
-    create: { userId, movieId, status: "COMPLETED", rating, notes },
+    create: { userId, movieId: movie.id, status: "COMPLETED", rating, notes },
   });
-  return { success: true };
+
+  // The title goes back deliberately. It is the model's only chance to notice
+  // it marked the wrong film, and the user's only chance to catch it, since
+  // "done" on its own confirms nothing about which film was meant.
+  return { success: true, title: movie.title };
 }
 
 // Every row returned here lands in the model's context, so this is a token
@@ -177,15 +281,48 @@ export async function getMovieDetails(
   };
 }
 
-export async function getShowtimes(movieId, date, { prisma = defaultPrisma } = {}) {
-  const where = { movieId };
+/**
+ * Showtimes for one film, looked up by TMDB id.
+ *
+ * This took a `movieId` and filtered `Session.movieId` with it directly, which
+ * is a foreign key to `Movie.id` — a uuid the model has never been shown. So
+ * every call filtered on a value that matched no row and came back `[]`.
+ *
+ * That is worse than the same bug in mark_watched, which at least failed
+ * loudly on the foreign key. `[]` is a *valid* answer here, meaning "nothing
+ * scheduled", so the model read it as fact and told the user the film was not
+ * playing — confidently, and wrongly, for a film that might be on tonight.
+ * A silent wrong answer beats a loud failure for cost every time.
+ *
+ * `found` exists because "we have no such film" and "that film has no sessions"
+ * are different things to tell a user, and an empty array cannot say which.
+ * The resolved `title` rides along for the same reason markWatched returns it:
+ * it is where a lookup for the wrong film becomes visible.
+ */
+export async function getShowtimes(tmdbId, date, { prisma = defaultPrisma } = {}) {
+  // Read-only: unlike markWatched this never creates the film. A Movie row with
+  // no sessions would be of no use to anyone, and inventing one to answer a
+  // question about showtimes would put a row in the table on the strength of a
+  // question rather than a fact.
+  const movie = await prisma.movie.findUnique({
+    where: { tmdbId },
+    select: { id: true, title: true },
+  });
+  if (!movie) return { found: false, title: null, sessions: [] };
+
+  const where = { movieId: movie.id };
   if (date) {
     const startDate = new Date(date);
     const endDate = new Date(startDate);
     endDate.setDate(endDate.getDate() + 1);
     where.startsAt = { gte: startDate, lt: endDate };
   }
-  return prisma.session.findMany({ where, include: { cinema: true } });
+
+  const sessions = await prisma.session.findMany({
+    where,
+    include: { cinema: true },
+  });
+  return { found: true, title: movie.title, sessions };
 }
 
 export async function recommendMovies(
