@@ -84,12 +84,6 @@ export function useChat(urlConversationId?: string) {
   const isLoadingHistory =
     urlId !== null && urlId !== conversationId && messages.length === 0;
 
-  // Remembers which thread we have already asked the server for. navigate() is
-  // not guaranteed to keep the same identity between renders, so the effect
-  // below can re-run more often than the URL actually changes; without this the
-  // repeats would each start another request.
-  const requestedIdRef = useRef<string | null>(null);
-
   // Rebuild whatever thread the URL names. This is what makes a refresh, or a
   // pasted link, show the conversation instead of an empty page.
   useEffect(() => {
@@ -97,8 +91,10 @@ export function useChat(urlConversationId?: string) {
     // matters more than it looks: the mid-stream URL rewrite re-runs this
     // effect, and without it we would fetch history during a live stream.
     if (!urlId || urlId === conversationId) return;
-    if (requestedIdRef.current === urlId) return;
-    requestedIdRef.current = urlId;
+    // No "already requested" ref here. A re-run always follows a cleanup that
+    // cancelled the previous request, so skipping the re-run left nothing to
+    // apply the response: StrictMode's mount-unmount-mount did exactly that and
+    // stranded every freshly mounted /chat/:id on "Loading conversation…".
 
     // Guards against a slow response for a thread the user has already navigated
     // away from landing on top of the one they are now looking at.

@@ -29,7 +29,10 @@ export default function MovieDetailModal({
 
   useEffect(() => {
     let active = true;
-    const today = new Date().toISOString().split("T")[0];
+    // NZ date, not UTC: toISOString() is still "yesterday" before 1pm in Auckland.
+    const today = new Date().toLocaleDateString("en-CA", {
+      timeZone: "Pacific/Auckland",
+    });
 
     const load = async () => {
       setIsLoading(true);
@@ -186,7 +189,7 @@ export default function MovieDetailModal({
                 <button
                   onClick={() => {
                     onClose();
-                    navigate(`/movies/${tmdbId}/cinemas`);
+                    navigate(`/movie/${tmdbId}/cinemas`);
                   }}
                   className="text-xs font-bold"
                   style={{ color: "var(--lime)" }}
