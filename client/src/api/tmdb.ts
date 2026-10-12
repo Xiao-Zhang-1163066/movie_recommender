@@ -1,10 +1,13 @@
 const BASE_URL = "https://api.themoviedb.org/3";
 export const IMG_URL = "https://image.tmdb.org/t/p/w500";
+// Backdrops are full-width, so w500 is blurry; "original" can be a multi-MB 4K file.
+export const BACKDROP_URL = "https://image.tmdb.org/t/p/w1280";
 const API_KEY = import.meta.env.VITE_TMDB_API_KEY;
 export interface Movie {
   id: number;
   title: string;
   poster_path: string | null;
+  backdrop_path: string | null;
   vote_average: number;
   overview: string;
   release_date: string; // e.g. "2024-11-15"

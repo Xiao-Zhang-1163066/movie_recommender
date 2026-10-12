@@ -7,14 +7,16 @@ export type Session = {
   cinema: { id: string; name: string; slug: string; suburb: string };
 };
 
+// Without a date the server returns every upcoming session.
 export async function getSessions(
   tmdbId: string | number,
-  date: string,
+  date?: string,
 ): Promise<Session[]> {
-  const res = await fetch(
-    `${API_BASE}/api/sessions?tmdbId=${tmdbId}&date=${date}`,
-    { method: "GET" },
-  );
+  const params = new URLSearchParams({ tmdbId: String(tmdbId) });
+  if (date) params.set("date", date);
+  const res = await fetch(`${API_BASE}/api/sessions?${params}`, {
+    method: "GET",
+  });
   if (!res.ok) {
     const errorData = await res.json();
     throw new Error(errorData.error || "Failed to fetch sessions");
