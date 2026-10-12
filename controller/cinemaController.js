@@ -19,7 +19,11 @@ const getCinemaBySlug = async (req, res) => {
   const cinema = await prisma.cinema.findUnique({
     where: { slug: cinemaSlug },
     include: {
+      // Upcoming only: the scraper never deletes past sessions, so without this
+      // the page lists every film this cinema has ever shown.
       sessions: {
+        where: { startsAt: { gt: new Date() } },
+        orderBy: { startsAt: "asc" },
         include: {
           movie: true,
         },

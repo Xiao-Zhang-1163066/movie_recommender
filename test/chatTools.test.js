@@ -402,7 +402,7 @@ describe("getShowtimes tool", () => {
     await getShowtimes(27205, "2020-01-01", { prisma });
 
     const { startsAt } = prisma.session.findMany.mock.calls[0][0].where;
-    expect(startsAt.gte).toEqual(new Date("2020-01-01"));
+    expect(startsAt.gte).toEqual(new Date("2019-12-31T11:00:00Z"));
     // Not silently overridden by an "upcoming only" rule.
     expect(startsAt.gt).toBeUndefined();
   });
@@ -445,9 +445,11 @@ describe("getShowtimes tool", () => {
     await getShowtimes(27205, "2026-10-15", { prisma });
 
     const { startsAt } = prisma.session.findMany.mock.calls[0][0].where;
-    expect(startsAt.gte).toEqual(new Date("2026-10-15"));
+    // An Auckland day (NZDT, UTC+13), not a UTC one: a 10am session on the
+    // 16th must not land on the 15th.
+    expect(startsAt.gte).toEqual(new Date("2026-10-14T11:00:00Z"));
     // Exclusive upper bound one day on, so a session at 23:59 is still included.
-    expect(startsAt.lt).toEqual(new Date("2026-10-16"));
+    expect(startsAt.lt).toEqual(new Date("2026-10-15T11:00:00Z"));
   });
 });
 

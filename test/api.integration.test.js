@@ -105,6 +105,41 @@ describe("GET /api/movies/:id", () => {
   });
 });
 
+describe("GET /api/cinemas/:slug", () => {
+  it("asks only for upcoming sessions, since past ones are never deleted", async () => {
+    prismaMock.cinema.findUnique.mockResolvedValue({ slug: "lumiere", sessions: [] });
+    const before = Date.now();
+
+    const res = await request(app).get("/api/cinemas/lumiere");
+
+    expect(res.status).toBe(200);
+    const { where } = prismaMock.cinema.findUnique.mock.calls[0][0].include.sessions;
+    expect(where.startsAt.gt.getTime()).toBeGreaterThanOrEqual(before);
+  });
+});
+
+describe("GET /api/sessions", () => {
+  it("defaults to upcoming sessions when no date is given", async () => {
+    prismaMock.session.findMany.mockResolvedValue([]);
+    const before = Date.now();
+
+    await request(app).get("/api/sessions");
+
+    const { where } = prismaMock.session.findMany.mock.calls[0][0];
+    expect(where.startsAt.gt.getTime()).toBeGreaterThanOrEqual(before);
+  });
+
+  it("still honours an explicit date, even a past one", async () => {
+    prismaMock.session.findMany.mockResolvedValue([]);
+
+    await request(app).get("/api/sessions?date=2020-01-01");
+
+    const { where } = prismaMock.session.findMany.mock.calls[0][0];
+    expect(where.startsAt.gte).toEqual(new Date("2019-12-31T11:00:00Z"));
+    expect(where.startsAt.gt).toBeUndefined();
+  });
+});
+
 describe("POST /api/auth/register", () => {
   it("returns 400 with a message when a required field is missing", async () => {
     const res = await request(app)

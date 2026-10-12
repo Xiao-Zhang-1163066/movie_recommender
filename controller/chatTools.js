@@ -2,6 +2,7 @@ import { prisma as defaultPrisma } from "../config/db.js";
 import { cache as defaultCache } from "../config/redis.js";
 import { embedQuery as defaultEmbedQuery, toSqlVector } from "../services/embeddingService.js";
 import { ToolFailure } from "../services/toolErrors.js";
+import { nzDayRange } from "../utils/nzDay.js";
 
 export const TMDB_IMG_BASE = "https://image.tmdb.org/t/p/w500";
 
@@ -414,10 +415,8 @@ export async function getShowtimes(tmdbId, date, { prisma = defaultPrisma } = {}
 
   const where = { movieId: movie.id };
   if (date) {
-    const startDate = new Date(date);
-    const endDate = new Date(startDate);
-    endDate.setDate(endDate.getDate() + 1);
-    where.startsAt = { gte: startDate, lt: endDate };
+    const { start, end } = nzDayRange(date);
+    where.startsAt = { gte: start, lt: end };
   } else {
     // Upcoming only. Without this the answer was every session ever scraped:
     // scraper/db.py deletes only *future* sessions before re-inserting, because
