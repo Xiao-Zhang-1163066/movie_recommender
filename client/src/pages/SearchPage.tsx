@@ -13,7 +13,6 @@ function SearchPage() {
 
   function handlePageChange(newPage: number) {
     setSearchParams({ q: query, page: String(newPage) });
-    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   if (isLoading) {

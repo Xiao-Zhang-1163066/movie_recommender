@@ -12,12 +12,14 @@ import PageNotFound from "./pages/PageNotFound";
 import SearchPage from "./pages/SearchPage";
 import { AuthProvider } from "./context/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
+import ScrollManager from "./components/ScrollManager";
 import WatchlistPage from "./pages/WatchListPage";
 
 function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
+        <ScrollManager />
         <Routes>
           <Route element={<Layout />}>
             <Route index element={<Navigate replace to="/movies" />} />
