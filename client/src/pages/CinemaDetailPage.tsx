@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import DatePicker from "@/components/DatePicker";
 import useCinema from "@/hooks/useCinema";
@@ -21,9 +21,14 @@ function CinemaDetailPage() {
   const [searchParams] = useSearchParams();
   const tmdbMovieId = searchParams.get("movieId");
 
-  const [selectedDate, setSelectedDate] = useState(() =>
-    new Date().toLocaleDateString("en-CA", { timeZone: TZ }),
-  );
+  // ?date= comes from a showtime card on the movie page. Anything that is not
+  // a YYYY-MM-DD falls back to today rather than an empty day.
+  const [selectedDate, setSelectedDate] = useState(() => {
+    const date = searchParams.get("date");
+    return date && /^\d{4}-\d{2}-\d{2}$/.test(date)
+      ? date
+      : new Date().toLocaleDateString("en-CA", { timeZone: TZ });
+  });
   const [selectedTmdbId, setSelectedTmdbId] = useState(tmdbMovieId);
 
   const cinemaSessions = useMemo(() => {
@@ -80,6 +85,29 @@ function CinemaDetailPage() {
       }));
   }, [effectiveTmdbId, selectedDate, cinema]);
 
+  // Arriving with ?movieId= from a movie page, the chosen poster can sit off
+  // the right edge of the row. Centre it once; later clicks are already visible.
+  // Scrolls the row itself, since scrollIntoView could also move the page.
+  // No deps on purpose: the row only exists once the cinema has loaded, so
+  // check after every render until it has run once.
+  const posterRowRef = useRef<HTMLDivElement>(null);
+  const hasCentredRef = useRef(false);
+  useEffect(() => {
+    const row = posterRowRef.current;
+    if (!tmdbMovieId || hasCentredRef.current || !row) return;
+    const poster = row.querySelector<HTMLElement>(
+      `[data-tmdb-id="${tmdbMovieId}"]`,
+    );
+    if (!poster) return;
+    hasCentredRef.current = true;
+    const rowBox = row.getBoundingClientRect();
+    const posterBox = poster.getBoundingClientRect();
+    // Instant, not smooth: a background tab (cmd-click) pauses the animation
+    // partway, and on arrival there is nothing for the motion to explain.
+    row.scrollLeft +=
+      posterBox.left - rowBox.left - (rowBox.width - posterBox.width) / 2;
+  });
+
   if (isLoading) {
     return (
       <div
@@ -121,10 +149,14 @@ function CinemaDetailPage() {
       </h1>
 
       {/* Movie poster row */}
-      <div className="flex gap-3 overflow-x-auto pb-2 mb-6">
+      <div
+        ref={posterRowRef}
+        className="flex gap-3 overflow-x-auto pb-2 mb-6"
+      >
         {sortedEntries.map(([tmdbId, data]) => (
           <div
             key={tmdbId}
+            data-tmdb-id={tmdbId}
             onClick={() => {
               const firstDate = Object.keys(data.dates)
                 .filter((d) => d >= today)
