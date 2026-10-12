@@ -1,16 +1,7 @@
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { useConversations } from "./useConversations";
-
-// "2 Jan" for anything older than today, a time for today. A sidebar row needs
-// only enough to tell two threads apart.
-function shortWhen(iso: string) {
-  const then = new Date(iso);
-  const sameDay = new Date().toDateString() === then.toDateString();
-  return sameDay
-    ? then.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
-    : then.toLocaleDateString([], { day: "numeric", month: "short" });
-}
 
 /**
  * The thread list beside the chat.
@@ -51,18 +42,17 @@ function ConversationList({ activeId }: { activeId?: string }) {
           <Link
             key={c.id}
             to={`/chat/${c.id}`}
-            className="px-3 py-2 rounded-lg text-sm truncate"
-            style={{
-              background: c.id === activeId ? "var(--surface-2)" : "transparent",
-              color: c.id === activeId ? "var(--foreground)" : "var(--text-2)",
-            }}
+            // Classes, not inline style: an inline background would beat hover:.
+            className={cn(
+              "px-3 py-2 rounded-lg text-sm truncate transition-colors",
+              c.id === activeId
+                ? "bg-white/5 text-foreground"
+                : "text-text-2 hover:bg-white/5 hover:text-foreground",
+            )}
             // The full title in a tooltip, since the row truncates it.
             title={c.title ?? "Untitled chat"}
           >
-            <span className="block truncate">{c.title ?? "Untitled chat"}</span>
-            <span className="block text-xs" style={{ color: "var(--text-2)" }}>
-              {shortWhen(c.updatedAt)}
-            </span>
+            {c.title ?? "Untitled chat"}
           </Link>
         ))}
       </nav>

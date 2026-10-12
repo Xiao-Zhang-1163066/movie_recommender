@@ -189,31 +189,18 @@ function MessageList({
         ))}
 
         {isLoading && !streamingText && (
-          <div className="self-start flex flex-col items-start gap-2">
-            {/* Unknown names fall back rather than render an empty pill — the
-                backend can add a tool before the frontend knows its wording. */}
+          <div
+            className="self-start flex items-center gap-3 px-4 py-3 text-sm"
+            style={{ borderRadius: "14px", background: "var(--surface-2)" }}
+          >
+            <DotStream size="36" speed="2.5" color="#c6f432" />
+            {/* Unknown names fall back rather than render nothing — the backend
+                can add a tool before the frontend knows its wording. */}
             {activeTool && (
-              <div
-                className="px-3 py-1.5 text-xs rounded-full"
-                style={{
-                  background: "var(--surface-2)",
-                  color: "var(--text-2)",
-                  border: "1px solid",
-                }}
-              >
+              <span style={{ color: "var(--text-2)" }}>
                 {TOOL_LABELS[activeTool] ?? "Working…"}
-              </div>
+              </span>
             )}
-            <div
-              className="px-4 py-3 text-sm leading-relaxed"
-              style={{
-                borderRadius: "14px",
-                background: "var(--surface-2)",
-                // color: "var(--text-2)",
-              }}
-            >
-              <DotStream size="60" speed="2.5" color="#c6f432" />
-            </div>
           </div>
         )}
 
